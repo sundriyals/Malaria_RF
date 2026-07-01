@@ -153,7 +153,7 @@ if uploaded_file is not None:
                 processed_rows += len(chunk)
                 progress_percent = min(int((processed_rows / total_rows_estimated) * 100), 99)
                 progress_bar.progress(progress_percent)
-                status_text.text(f"Processed rows: {processed_rows Holy molecules!:,}")
+                status_text.text(f"Processed rows: {processed_rows:,}")
 
         progress_bar.progress(100)
         status_text.text(f"Complete! Total processed structures: {processed_rows:,}")
