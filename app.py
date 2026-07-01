@@ -123,4 +123,4 @@ if single_smiles:
         
         # Pull 5 nearest neighbors (no self-matches exist for a fresh, unseen molecule input)
         dist, _ = nn_engine.kneighbors(X_single, n_neighbors=5)
-        mean_dist =
+        mean_dist = np.mean(dist)  # <--- Make sure this matches!
