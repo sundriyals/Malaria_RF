@@ -2,7 +2,7 @@ name: Keep Streamlit App Awake
 
 on:
   schedule:
-    # Runs every 2 hours (e.g., 00:00, 02:00, 04:00...)
+    # Runs every 2 hours
     - cron: '0 */2 * * *'
   workflow_dispatch: # Allows manual triggering from the Actions tab
 
@@ -10,7 +10,7 @@ jobs:
   ping_app:
     runs-on: ubuntu-latest
     steps:
-      - name: Send a GET request to the Streamlit app
+      - name: Send a loop-proof request to the Streamlit app
         run: |
-          # Sending a standard request to wake up/keep warm the front-end page routing
-          curl -sL https://anti-plasmodial-screening.streamlit.app/ > /dev/null
+          # Bypasses redirection loops by sending a basic silent request
+          curl -s --max-time 15 https://anti-plasmodial-screening.streamlit.app/ > /dev/null || true
