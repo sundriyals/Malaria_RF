@@ -16,7 +16,7 @@ st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide
 # ==============================================================================
 # 💡 OPTIMIZATION: Hardcoding the APD threshold completely eliminates the startup crash!
 # You can change this decimal to match your exact expected threshold.
-APD_THRESHOLD_CONSTANT = 0.3850 
+APD_THRESHOLD_CONSTANT = 0.6744 
 
 # ==============================================================================
 # MOLECULAR FEATURIZATION PIPELINE
