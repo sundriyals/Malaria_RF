@@ -14,9 +14,8 @@ st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
-# 💡 OPTIMIZATION: Hardcoding the APD threshold completely eliminates the startup crash!
-# You can change this decimal to match your exact expected threshold.
-APD_THRESHOLD_CONSTANT = 0.6744 
+# Your exact calculated threshold value
+APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
 # MOLECULAR FEATURIZATION PIPELINE
@@ -35,19 +34,16 @@ def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
         return None
 
 # ==============================================================================
-# MODEL LOADING ENGINE
+# MODEL & LIGHTWEIGHT APD LOADING ENGINE
 # ==============================================================================
 @st.cache_resource
 def load_model_artifacts():
-    """
-    Downloads model assets dynamically and loads them.
-    Bypasses heavy matrix-wide calculations to stay safely within RAM limits.
-    """
+    """Downloads model and the lightweight reference fingerprint matrix."""
     MODEL_URL = "https://github.com/sundriyals/Malaria_RF/releases/download/v1.0.0/malaria_rf_ecfp4_model.joblib"
-    FEATURES_URL = "https://github.com/sundriyals/Malaria_RF/releases/download/v1.0.0/ecfp4_features.npy"
+    FEATURES_URL = "https://github.com/sundriyals/Malaria_RF/releases/download/v1.0.0/apd_reference_fingerprints.npy"
     
     model_path = "malaria_rf_ecfp4_model.joblib"
-    features_path = "ecfp4_features.npy"
+    features_path = "apd_reference_fingerprints.npy"
     
     def download_large_file(url, destination):
         with urllib.request.urlopen(url) as response, open(destination, 'wb') as out_file:
@@ -61,34 +57,27 @@ def load_model_artifacts():
     status_box = st.empty()
     
     if not os.path.exists(model_path):
-        status_box.info("📥 Downloading core Random Forest model from Release assets...")
+        status_box.info("📥 Downloading core Random Forest model...")
         download_large_file(MODEL_URL, model_path)
         
     if not os.path.exists(features_path):
-        status_box.info("📥 Downloading ECFP4 training feature matrix...")
+        status_box.info("📥 Downloading lightweight APD reference matrix...")
         download_large_file(FEATURES_URL, features_path)
         
-    status_box.success("🎉 All machine learning core assets loaded successfully!")
+    status_box.success("🎉 Web assets initialized cleanly!")
             
-    # Load model and features into server memory
+    # Load components into server memory
     model = joblib.load(model_path)
-    X_train = np.load(features_path) 
+    X_ref = np.load(features_path) 
     
-    # Take a representative sample of the training features to fit the NN engine
-    # This keeps the kneighbors search fast and light on RAM during inference
-    sample_size = min(5000, X_train.shape[0])
-    np.random.seed(42)
-    sample_indices = np.random.choice(X_train.shape[0], size=sample_size, replace=False)
-    X_train_sample = X_train[sample_indices]
-    
-    # Fit engine on the lightweight subset
+    # Fit the engine instantly using our compact reference array
     nn = NearestNeighbors(n_neighbors=5, metric='jaccard', n_jobs=-1)
-    nn.fit(X_train_sample)
+    nn.fit(X_ref)
     
     status_box.empty()
     return model, nn
 
-# Safe execution sequence to initiate the backend
+# Safe execution sequence
 try:
     model, nn_engine = load_model_artifacts()
 except Exception as e:
@@ -127,7 +116,7 @@ if single_smiles:
         mean_dist = np.mean(dist)
         
         activity_res = "Active" if pred == 1 else "Inactive"
-        apd_res = "Reliable (Inside APD)" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable (Outside APD)"
+        apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -188,31 +177,26 @@ if uploaded_file is not None:
                     distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
                     mean_distances = np.mean(distances, axis=1)
                     
-                    activity_column = []
-                    for pred, prob in zip(preds, probs):
-                        class_label = "Active" if pred == 1 else "Inactive"
-                        activity_column.append(f"{class_label} ({prob*100:.1f}%)")
-                        
-                    apd_column = []
-                    for dist in mean_distances:
-                        if dist <= APD_THRESHOLD_CONSTANT:
-                            apd_column.append("Reliable (Inside APD)")
-                        else:
-                            apd_column.append("Unreliable (Outside APD)")
+                    # Generate arrays containing cleaned up, separated values
+                    activity_labels = ["Active" if p == 1 else "Inactive" for p in preds]
+                    probability_scores = [f"{prob*100:.1f}%" for prob in probs]
+                    apd_labels = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
                     
                     for idx in range(len(chunk)):
                         if idx in chunk_valid_indices:
                             list_pos = chunk_valid_indices.index(idx)
                             all_results.append({
                                 "SMILES": chunk.iloc[idx][target_col],
-                                "Activity Prediction": activity_column[list_pos],
+                                "Activity Prediction": activity_labels[list_pos],
+                                "Probability Score": probability_scores[list_pos],
                                 "Mean Neighbor Distance": f"{mean_distances[list_pos]:.4f}",
-                                "APD Status": apd_column[list_pos]
+                                "APD Status": apd_labels[list_pos]
                             })
                         else:
                             all_results.append({
                                 "SMILES": chunk.iloc[idx][target_col],
                                 "Activity Prediction": "Invalid SMILES structure",
+                                "Probability Score": "N/A",
                                 "Mean Neighbor Distance": "N/A",
                                 "APD Status": "N/A"
                             })
@@ -221,6 +205,7 @@ if uploaded_file is not None:
                         all_results.append({
                             "SMILES": chunk.iloc[idx][target_col],
                             "Activity Prediction": "Invalid SMILES structure",
+                            "Probability Score": "N/A",
                             "Mean Neighbor Distance": "N/A",
                             "APD Status": "N/A"
                         })
