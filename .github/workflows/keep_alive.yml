@@ -2,8 +2,8 @@ name: Keep Streamlit App Awake
 
 on:
   schedule:
-    # Runs every day at 12:00 UTC
-    - cron: '0 12 * * *'
+    # Runs every 2 hours (e.g., 00:00, 02:00, 04:00...)
+    - cron: '0 */2 * * *'
   workflow_dispatch: # Allows manual triggering from the Actions tab
 
 jobs:
@@ -12,4 +12,5 @@ jobs:
     steps:
       - name: Send a GET request to the Streamlit app
         run: |
-          curl -sI https://anti-plasmodial-screening.streamlit.app/ | head -n 1
+          # Sending a standard request to wake up/keep warm the front-end page routing
+          curl -sL https://anti-plasmodial-screening.streamlit.app/ > /dev/null
