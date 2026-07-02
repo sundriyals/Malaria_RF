@@ -5,9 +5,11 @@ import os
 import joblib
 import urllib.request
 import urllib.error
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from sklearn.neighbors import NearestNeighbors
+import warnings
+import traceback
+
+# Silence scikit-learn's Jaccard boolean data conversion warnings safely
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 # Set page configuration
 st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide")
@@ -15,7 +17,6 @@ st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
-# Your exact calculated threshold value from Google Colab
 APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
@@ -24,9 +25,22 @@ APD_THRESHOLD_CONSTANT = 0.6744
 def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
     """Converts a SMILES string into a 2048-bit binary ECFP4 fingerprint."""
     try:
+        smiles = str(smiles).strip()
+        if not smiles or smiles == "nan" or smiles.lower() == "none":
+            return None
+            
         mol = Chem.MolFromSmiles(smiles)
+        
+        # Fallback for complex structures
+        if mol is None:
+            mol = Chem.MolFromSmiles(smiles, sanitize=False)
+            if mol is not None:
+                mol.UpdatePropertyCache(strict=False)
+                Chem.FastFindRings(mol)
+                
         if mol is None:
             return None
+            
         fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=nBits)
         arr = np.zeros((0,), dtype=np.int8)
         Chem.DataStructs.ConvertToNumpyArray(fp, arr)
@@ -35,7 +49,7 @@ def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
         return None
 
 # ==============================================================================
-# MODEL & APD LOADING ENGINE (WITH DETAILED ERROR DEBUGGING)
+# MODEL & APD LOADING ENGINE
 # ==============================================================================
 @st.cache_resource
 def load_model_artifacts():
@@ -56,11 +70,7 @@ def load_model_artifacts():
                         break
                     out_file.write(buffer)
         except urllib.error.HTTPError as e:
-            # This will pinpoint exactly which URL is broken if a 404 occurs
-            raise Exception(
-                f"HTTP {e.code} Error: Could not download asset from URL: {url}. "
-                f"Please verify that your GitHub Release tag is exactly 'v1.0.0' and the file asset name matches perfectly."
-            )
+            raise Exception(f"HTTP {e.code} Error: Could not download asset from URL: {url}.")
 
     status_box = st.empty()
     
@@ -74,19 +84,19 @@ def load_model_artifacts():
         
     status_box.success("🎉 Web assets initialized cleanly!")
             
-    # Load components into server memory
     model = joblib.load(model_path)
     X_train = np.load(features_path) 
     
-    # Fit the engine using our training array
     nn = NearestNeighbors(n_neighbors=5, metric='jaccard', n_jobs=-1)
     nn.fit(X_train)
     
     status_box.empty()
     return model, nn
 
-# Safe execution sequence
 try:
+    # Importing RDKit elements just in case it wasn't pre-initialized globally
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
     model, nn_engine = load_model_artifacts()
 except Exception as e:
     st.error(f"⚠️ App Core Initialization Error: {e}")
@@ -160,75 +170,65 @@ if uploaded_file is not None:
         target_col = smiles_col[0]
         st.success(f"Processing structural pipeline using column: '{target_col}'")
         
-        all_results = []
+        processed_chunks = []
         progress_bar = st.progress(0)
         status_text = st.empty()
         processed_rows = 0
         
-        with st.spinner("Streaming chemical spaces and processing APD constraints..."):
-            for chunk in pd.read_csv(uploaded_file, chunksize=5000):
-                chunk = chunk.reset_index(drop=True)
-                chunk_features = []
-                chunk_valid_indices = []
-                
-                for idx, smiles in enumerate(chunk[target_col]):
-                    fp = smiles_to_ecfp4(str(smiles).strip())
-                    if fp is not None:
-                        chunk_features.append(fp)
-                        chunk_valid_indices.append(idx)
-                
-                if len(chunk_features) > 0:
-                    X_screen = np.array(chunk_features)
+        try:
+            with st.spinner("Streaming chemical spaces and processing APD constraints..."):
+                for chunk in pd.read_csv(uploaded_file, chunksize=5000):
+                    chunk = chunk.reset_index(drop=True)
                     
-                    preds = model.predict(X_screen)
-                    probs = model.predict_proba(X_screen)[:, 1]
+                    # Compute fingerprints rapidly using pandas .apply() instead of an explicit row loop
+                    fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
+                    valid_mask = fingerprints.notna()
                     
-                    distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
-                    mean_distances = np.mean(distances, axis=1)
+                    # Create default placeholder columns preserving original user data
+                    chunk["Activity Prediction"] = "Invalid SMILES structure"
+                    chunk["Probability Score"] = "N/A"
+                    chunk["Mean Neighbor Distance"] = "N/A"
+                    chunk["APD Status"] = "N/A"
                     
-                    activity_labels = ["Active" if p == 1 else "Inactive" for p in preds]
-                    probability_scores = [f"{prob*100:.1f}%" for prob in probs]
-                    apd_labels = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
-                    
-                    for idx in range(len(chunk)):
-                        # Retain all original columns from user uploaded CSV
-                        row_dict = chunk.iloc[idx].to_dict()
+                    if valid_mask.any():
+                        # Extract only valid fingerprints to run ML on
+                        X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
                         
-                        if idx in chunk_valid_indices:
-                            list_pos = chunk_valid_indices.index(idx)
-                            row_dict["Activity Prediction"] = activity_labels[list_pos]
-                            row_dict["Probability Score"] = probability_scores[list_pos]
-                            row_dict["Mean Neighbor Distance"] = f"{mean_distances[list_pos]:.4f}"
-                            row_dict["APD Status"] = apd_labels[list_pos]
-                        else:
-                            row_dict["Activity Prediction"] = "Invalid SMILES structure"
-                            row_dict["Probability Score"] = "N/A"
-                            row_dict["Mean Neighbor Distance"] = "N/A"
-                            row_dict["APD Status"] = "N/A"
-                        all_results.append(row_dict)
-                else:
-                    for idx in range(len(chunk)):
-                        row_dict = chunk.iloc[idx].to_dict()
-                        row_dict["Activity Prediction"] = "Invalid SMILES structure"
-                        row_dict["Probability Score"] = "N/A"
-                        row_dict["Mean Neighbor Distance"] = "N/A"
-                        row_dict["APD Status"] = "N/A"
-                        all_results.append(row_dict)
-                
-                processed_rows += len(chunk)
-                status_text.text(f"Processed structural records: {processed_rows:,}")
+                        # Generate batch predictions
+                        preds = model.predict(X_screen)
+                        probs = model.predict_proba(X_screen)[:, 1]
+                        
+                        distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
+                        mean_distances = np.mean(distances, axis=1)
+                        
+                        # Vectorized formatting assignments back into the dataframe structure
+                        chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
+                        chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
+                        chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
+                        chunk.loc[valid_mask, "APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
+                    
+                    processed_chunks.append(chunk)
+                    processed_rows += len(chunk)
+                    status_text.text(f"Processed structural records: {processed_rows:,}")
 
-        progress_bar.progress(100)
-        status_text.text(f"Complete! Total evaluated compounds: {processed_rows:,}")
-        
-        results_df = pd.DataFrame(all_results)
-        st.write("### 📊 Screening Preview Results (First 500 Records)")
-        st.dataframe(results_df.head(500), use_container_width=True)
-        
-        csv_export = results_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Complete Screened Compounds Table",
-            data=csv_export,
-            file_name="malaria_screening_results.csv",
-            mime="text/csv"
-        )
+            progress_bar.progress(100)
+            status_text.text(f"Complete! Total evaluated compounds: {processed_rows:,}")
+            
+            # Combine the processed chunks smoothly
+            results_df = pd.concat(processed_chunks, ignore_index=True)
+            
+            st.write("### 📊 Screening Preview Results (First 500 Records)")
+            st.dataframe(results_df.head(500), use_container_width=True)
+            
+            # Memory-efficient download extraction
+            csv_export = results_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Complete Screened Compounds Table",
+                data=csv_export,
+                file_name="malaria_screening_results.csv",
+                mime="text/csv"
+            )
+            
+        except Exception as batch_error:
+            st.error("❌ An unexpected pipeline tracking error occurred during processing.")
+            st.code(traceback.format_exc(), language="python")
