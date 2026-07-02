@@ -14,7 +14,7 @@ st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
-# Your exact calculated threshold value
+# Your exact calculated threshold value from Google Colab
 APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
@@ -38,12 +38,13 @@ def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
 # ==============================================================================
 @st.cache_resource
 def load_model_artifacts():
-    """Downloads model and the lightweight reference fingerprint matrix."""
+    """Downloads core model assets dynamically and loads them safely."""
     MODEL_URL = "https://github.com/sundriyals/Malaria_RF/releases/download/v1.0.0/malaria_rf_ecfp4_model.joblib"
-    FEATURES_URL = "https://github.com/sundriyals/Malaria_RF/releases/download/v1.0.0/apd_reference_fingerprints.npy"
+    # FIXED: Reverted back to your actual uploaded release file asset
+    FEATURES_URL = "https://github.com/sundriyals/Malaria_RF/releases/download/v1.0.0/ecfp4_features.npy"
     
     model_path = "malaria_rf_ecfp4_model.joblib"
-    features_path = "apd_reference_fingerprints.npy"
+    features_path = "ecfp4_features.npy"
     
     def download_large_file(url, destination):
         with urllib.request.urlopen(url) as response, open(destination, 'wb') as out_file:
@@ -61,18 +62,18 @@ def load_model_artifacts():
         download_large_file(MODEL_URL, model_path)
         
     if not os.path.exists(features_path):
-        status_box.info("📥 Downloading lightweight APD reference matrix...")
+        status_box.info("📥 Downloading ECFP4 training feature matrix...")
         download_large_file(FEATURES_URL, features_path)
         
     status_box.success("🎉 Web assets initialized cleanly!")
             
     # Load components into server memory
     model = joblib.load(model_path)
-    X_ref = np.load(features_path) 
+    X_train = np.load(features_path) 
     
-    # Fit the engine instantly using our compact reference array
+    # Fit the engine instantly using our training array (Safe now without full kneighbors loops!)
     nn = NearestNeighbors(n_neighbors=5, metric='jaccard', n_jobs=-1)
-    nn.fit(X_ref)
+    nn.fit(X_train)
     
     status_box.empty()
     return model, nn
@@ -177,7 +178,7 @@ if uploaded_file is not None:
                     distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
                     mean_distances = np.mean(distances, axis=1)
                     
-                    # Generate arrays containing cleaned up, separated values
+                    # Generated cleaned up, separated data arrays
                     activity_labels = ["Active" if p == 1 else "Inactive" for p in preds]
                     probability_scores = [f"{prob*100:.1f}%" for prob in probs]
                     apd_labels = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
