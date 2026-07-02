@@ -8,6 +8,11 @@ import urllib.error
 import warnings
 import traceback
 
+# Core Cheminformatics & Machine Learning Imports (RESTORED)
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from sklearn.neighbors import NearestNeighbors
+
 # Silence scikit-learn's Jaccard boolean data conversion warnings safely
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
@@ -94,9 +99,6 @@ def load_model_artifacts():
     return model, nn
 
 try:
-    # Importing RDKit elements just in case it wasn't pre-initialized globally
-    from rdkit import Chem
-    from rdkit.Chem import AllChem
     model, nn_engine = load_model_artifacts()
 except Exception as e:
     st.error(f"⚠️ App Core Initialization Error: {e}")
@@ -180,7 +182,7 @@ if uploaded_file is not None:
                 for chunk in pd.read_csv(uploaded_file, chunksize=5000):
                     chunk = chunk.reset_index(drop=True)
                     
-                    # Compute fingerprints rapidly using pandas .apply() instead of an explicit row loop
+                    # Compute fingerprints rapidly using pandas .apply()
                     fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
                     valid_mask = fingerprints.notna()
                     
