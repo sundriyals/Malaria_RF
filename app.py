@@ -58,7 +58,7 @@ st.markdown("""
 APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
-# MOLECULAR FEATURIZATION & PROPERTY ENGINE
+# DATAWARRIOR ALIGNED FEATURIZATION & PROPERTY ENGINE
 # ==============================================================================
 def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
     """Converts a SMILES string into a 2048-bit binary ECFP4 fingerprint."""
@@ -82,7 +82,7 @@ def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
         return None
 
 def compute_adme_lipinski(smiles):
-    """Computes quantitative Lipinski descriptors and assigns a Pass/Fail status."""
+    """Computes quantitative Lipinski descriptors and assigns Pass/Fail (Max 1 violation)."""
     try:
         smiles = str(smiles).strip()
         if not smiles or smiles == "nan" or smiles.lower() == "none":
@@ -105,7 +105,10 @@ def compute_adme_lipinski(smiles):
         return [np.nan, np.nan, np.nan, np.nan, "Calculation Error"]
 
 def get_datawarrior_aligned_amcs(smiles):
-    """Calculates DataWarrior chemical filters via atom-by-atom validation (BaN >= 1, AR >= 2, cLogP >= 2.0, TPSA <= 80.0)"""
+    """
+    Calculates DataWarrior AMCS space metrics. Status is 'Fail' only if 
+    MORE THAN ONE criteria is missed (violations >= 2).
+    """
     try:
         smiles = str(smiles).strip()
         if not smiles or smiles == "nan" or smiles.lower() == "none":
@@ -123,7 +126,7 @@ def get_datawarrior_aligned_amcs(smiles):
         tpsa = round(Descriptors.TPSA(mol), 2)
         ar = Descriptors.NumAromaticRings(mol)
         
-        # Non-basic nitrogen environment exclusions
+        # Non-basic nitrogen isolation SMARTS rules
         amide_smarts = Chem.MolFromSmarts("[NX3][CX3](=[OX1,SX1])")
         sulfonamide_smarts = Chem.MolFromSmarts("[NX3][SX4](=[OX1])(=[OX1])")
         nitro_smarts = Chem.MolFromSmarts("[NX3](=[OX1])=[OX1]")
@@ -134,23 +137,27 @@ def get_datawarrior_aligned_amcs(smiles):
         
         ban = 0
         for atom in mol.GetAtoms():
-            if atom.GetAtomicNum() == 7:  # Nitrogen check
+            if atom.GetAtomicNum() == 7:  
                 idx = atom.GetIdx()
                 if idx in amide_matches or idx in sulfonamide_matches or idx in nitro_matches:
                     continue
-                
-                # Aliphatic Nitrogens (e.g., diethylamine tails)
                 if not atom.GetIsAromatic():
                     if any(neighbor.GetIsAromatic() for neighbor in atom.GetNeighbors()):
                         continue
                     ban += 1
-                # Aromatic Nitrogens (e.g., pyridines/quinolines where connection degree == 2)
                 else:
                     if atom.GetDegree() == 2:
                         ban += 1
                         
-        is_amcs_pass = (ban >= 1) and (ar >= 2) and (clogp >= 2.0) and (tpsa <= 80.0)
-        amcs_status = "Pass" if is_amcs_pass else "Fail"
+        # Calculate individual violations to enforce relaxed AMCS logic
+        violations = 0
+        if ban < 1: violations += 1
+        if ar < 2: violations += 1
+        if clogp < 2.0: violations += 1
+        if tpsa > 80.0: violations += 1
+        
+        # Pass unless more than one criterion is missed (violations >= 2)
+        amcs_status = "Fail" if violations > 1 else "Pass"
         return [ban, ar, clogp, tpsa, amcs_status]
     except Exception:
         return [np.nan, np.nan, np.nan, np.nan, "Calculation Error"]
@@ -205,139 +212,147 @@ st.title("🔬 Anti-Plasmodial Activity & Property Profiling Portal")
 tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validation & Metrics"])
 
 with tab_screen:
-    st.markdown(f"Upload screening candidates containing structural **SMILES** strings to evaluate anti-malarial properties. Compounds are prioritized via ML engines, **Lipinski rules**, and DataWarrior **AMCS parameters**.\n* **Model APD Threshold Boundary:** `{APD_THRESHOLD_CONSTANT:.4f}`")
+    st.markdown(f"Evaluate anti-malarial property candidates via ML engines, **Lipinski rules**, and DataWarrior **AMCS parameters**.\n* **Model APD Threshold Boundary:** `{APD_THRESHOLD_CONSTANT:.4f}`")
 
-    st.write("### 🧪 Single Compound Quick Screen")
-    
-    input_mode = st.radio("Choose Input Type:", ["Type / Paste SMILES String", "Draw Structure Molecule Canvas Editor"], horizontal=True)
-    
-    single_smiles = ""
-    if input_mode == "Type / Paste SMILES String":
-        single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine):", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
-    else:
-        st.caption("ℹ️ Use the drawing tools below to sketch your candidate. Click the green 'Apply' checkmark inside Ketcher's toolbar to automatically compute descriptors.")
+    # Master Left/Right Column Configuration to eliminate vertical scrolling layout lag
+    left_panel, right_panel = st.columns([1, 1], gap="large")
+
+    # --------------------------------------------------------------------------
+    # LEFT PANEL: SINGLE MOLECULE SCREENING WORKSPACE
+    # --------------------------------------------------------------------------
+    with left_panel:
+        st.write("### 🧪 Single Compound Workspace")
+        input_mode = st.radio("Input Selection Mode:", ["Type / Paste SMILES String", "Draw Structure Molecule Canvas Editor"], horizontal=True)
         
-        # Split the screen into two columns. Put Ketcher in the first column to make it half width.
-        sketch_col, space_col = st.columns([1, 1])
-        with sketch_col:
+        single_smiles = ""
+        if input_mode == "Type / Paste SMILES String":
+            single_smiles = st.text_input("SMILES String input:", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC", label_visibility="collapsed")
+        else:
+            st.caption("ℹ️ Draw structure below. Click the green 'Apply' checkmark inside Ketcher to calculate metrics.")
             single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
 
-    if single_smiles:
-        single_smiles = single_smiles.strip()
-        fp = smiles_to_ecfp4(single_smiles)
-        adme_res = compute_adme_lipinski(single_smiles)
-        amcs_res = get_datawarrior_aligned_amcs(single_smiles)
-        
-        if fp is None or adme_res[4] == "Invalid Structure" or amcs_res[4] == "Invalid Structure":
-            st.error("❌ Invalid SMILES structure string. Please verify chemical notation or ensure the drawing canvas is not empty.")
-        else:
-            X_single = np.array([fp])
-            pred = model.predict(X_single)[0]
-            prob = model.predict_proba(X_single)[0][1]
-            dist, _ = nn_engine.kneighbors(X_single, n_neighbors=5)
-            mean_dist = np.mean(dist)
-            activity_res = "Active" if pred == 1 else "Inactive"
-            apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
+        if single_smiles:
+            single_smiles = single_smiles.strip()
+            fp = smiles_to_ecfp4(single_smiles)
+            adme_res = compute_adme_lipinski(single_smiles)
+            amcs_res = get_datawarrior_aligned_amcs(single_smiles)
             
-            st.markdown(f"**Identified SMILES Structure Context:** `{single_smiles}`")
-            
-            # 1. Core Model Performance Metrics Box
-            with st.container(border=True):
-                st.markdown("#### 🤖 Machine Learning Model Evaluation")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Predicted Activity Class", activity_res)
-                c2.metric("Probability Score Score", f"{prob*100:.1f}%")
-                c3.metric("Model APD Domain Range", apd_res)
-            
-            # 2. Separated Box for Lipinski Parameters
-            with st.container(border=True):
-                st.markdown(f"#### 💊 Lipinski Rule of 5 Profile — Status: **{adme_res[4]}**")
-                l1, l2, l3, l4 = st.columns(4)
-                l1.metric("Mol Weight (<=500)", f"{adme_res[0]} Da")
-                l2.metric("Lipophilicity LogP (<=5)", adme_res[1])
-                l3.metric("H-Bond Donors (<=5)", adme_res[2])
-                l4.metric("H-Bond Acceptors (<=10)", adme_res[3])
+            if fp is None or adme_res[4] == "Invalid Structure" or amcs_res[4] == "Invalid Structure":
+                st.error("❌ Invalid structure context. Verify structural notations or canvas inputs.")
+            else:
+                X_single = np.array([fp])
+                pred = model.predict(X_single)[0]
+                prob = model.predict_proba(X_single)[0][1]
+                dist, _ = nn_engine.kneighbors(X_single, n_neighbors=5)
+                mean_dist = np.mean(dist)
+                activity_res = "Active" if pred == 1 else "Inactive"
+                apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
                 
-            # 3. Separated Box for AMCS Parameters
-            with st.container(border=True):
-                st.markdown(f"#### 🧬 Antimalarial Chemical Space (AMCS) — Status: **{amcs_res[4]}**")
-                a1, a2, a3, a4 = st.columns(4)
-                a1.metric("Basic Nitrogens (BaN >= 1)", int(amcs_res[0]) if not np.isnan(amcs_res[0]) else "N/A")
-                a2.metric("Aromatic Rings (AR >= 2)", int(amcs_res[1]) if not np.isnan(amcs_res[1]) else "N/A")
-                a3.metric("Computed cLogP (>= 2.0)", amcs_res[2])
-                a4.metric("TPSA Surface Area (<= 80)", f"{amcs_res[3]} Å²" if not np.isnan(amcs_res[3]) else "N/A")
+                st.markdown(f"**Target Structure SMILES:** `{single_smiles}`")
+                
+                # 1. ML Profile Box
+                with st.container(border=True):
+                    st.markdown("#### 🤖 Machine Learning Model Evaluation")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Predicted Activity Class", activity_res)
+                    c2.metric("Probability Score", f"{prob*100:.1f}%")
+                    c3.metric("Model APD Domain Range", apd_res)
+                
+                # 2. Separated Lipinski Box
+                with st.container(border=True):
+                    st.markdown(f"#### 💊 Lipinski Rule of 5 Profile — Status: **{adme_res[4]}**")
+                    l1, l2, l3, l4 = st.columns(4)
+                    l1.metric("Mol Weight (<=500)", f"{adme_res[0]} Da")
+                    l2.metric("Lipophilicity LogP (<=5)", adme_res[1])
+                    l3.metric("H-Bond Donors (<=5)", adme_res[2])
+                    l4.metric("H-Bond Acceptors (<=10)", adme_res[3])
+                    
+                # 3. Separated AMCS Box (Using custom violation metric threshold rule)
+                with st.container(border=True):
+                    st.markdown(f"#### 🧬 DataWarrior AMCS Space — Status: **{amcs_res[4]}**")
+                    a1, a2, a3, a4 = st.columns(4)
+                    a1.metric("Basic Nitrogens (BaN >= 1)", int(amcs_res[0]) if not np.isnan(amcs_res[0]) else "N/A")
+                    a2.metric("Aromatic Rings (AR >= 2)", int(amcs_res[1]) if not np.isnan(amcs_res[1]) else "N/A")
+                    a3.metric("DataWarrior cLogP (>= 2.0)", amcs_res[2])
+                    a4.metric("DataWarrior TPSA Area (<= 80)", f"{amcs_res[3]} Å²" if not np.isnan(amcs_res[3]) else "N/A")
 
-    st.markdown("---")
-    st.write("### 📂 Batch File High-Throughput Screening")
-    uploaded_file = st.file_uploader("Choose a CSV file to screen", type=["csv"])
+    # --------------------------------------------------------------------------
+    # RIGHT PANEL: HIGH-THROUGHPUT BATCH DISPATCH ENGINE
+    # --------------------------------------------------------------------------
+    with right_panel:
+        st.write("### 📂 High-Throughput Batch Processing")
+        uploaded_file = st.file_uploader("Upload compound spreadsheet matrices directly:", type=["csv"], label_visibility="collapsed")
 
-    if uploaded_file is not None:
-        try:
-            header_df = pd.read_csv(uploaded_file, nrows=2)
-            uploaded_file.seek(0) 
-        except Exception as e:
-            st.error(f"❌ Read Error: {e}"); st.stop()
-
-        smiles_col = [col for col in header_df.columns if col.lower() in ['smiles', 'smiles string', 'structure']]
-        if not smiles_col:
-            st.error("❌ Column Error: Could not locate a 'Smiles' or 'Structure' column header.")
-        else:
-            target_col = smiles_col[0]
-            st.success(f"Processing structural pipeline using column: '{target_col}'")
-            processed_chunks, progress_bar = [], st.progress(0)
-            status_text, processed_rows = st.empty(), 0
-            
+        if uploaded_file is not None:
             try:
-                with st.spinner("Streaming data matrices, checking ADME models..."):
-                    for chunk in pd.read_csv(uploaded_file, chunksize=5000):
-                        chunk = chunk.reset_index(drop=True)
-                        adme_data = list(chunk[target_col].apply(compute_adme_lipinski))
-                        adme_df = pd.DataFrame(adme_data, columns=['MW (Da)', 'LogP', 'H-Bond Donors', 'H-Bond Acceptors', 'Lipinski Status'])
-                        amcs_data = list(chunk[target_col].apply(get_datawarrior_aligned_amcs))
-                        amcs_df = pd.DataFrame(amcs_data, columns=['Basic Nitrogens', 'Aromatic Rings', 'cLogP', 'TPSA (Å²)', 'AMCS Status'])
-                        chunk = pd.concat([chunk, adme_df, amcs_df], axis=1)
-                        fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
-                        valid_mask = fingerprints.notna()
-                        chunk["Activity Prediction"], chunk["Probability Score"] = "Invalid Structure", "N/A"
-                        chunk["Mean Neighbor Distance"], chunk["Model APD Status"] = "N/A", "N/A"
-                        
-                        if valid_mask.any():
-                            X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
-                            preds = model.predict(X_screen)
-                            probs = model.predict_proba(X_screen)[:, 1]
-                            distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
-                            mean_distances = np.mean(distances, axis=1)
-                            chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
-                            chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
-                            chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
-                            chunk.loc[valid_mask, "Model APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
-                        
-                        processed_chunks.append(chunk)
-                        processed_rows += len(chunk)
-                        status_text.text(f"Processed records: {processed_rows:,}")
+                header_df = pd.read_csv(uploaded_file, nrows=2)
+                uploaded_file.seek(0) 
+            except Exception as e:
+                st.error(f"❌ Read Error: {e}"); st.stop()
 
-                progress_bar.progress(100)
-                results_df = pd.concat(processed_chunks, ignore_index=True)
+            smiles_col = [col for col in header_df.columns if col.lower() in ['smiles', 'smiles string', 'structure']]
+            if not smiles_col:
+                st.error("❌ Column Error: Could not locate a 'Smiles' or 'Structure' column header header.")
+            else:
+                target_col = smiles_col[0]
+                st.success(f"Running high-throughput matrix pipeline on column: '{target_col}'")
+                processed_chunks, progress_bar = [], st.progress(0)
+                status_text, processed_rows = st.empty(), 0
                 
-                st.markdown("### 📊 Dataset View Filter Configurations")
-                view_selection = st.radio("Filter output rows:", ["Show All Checked Compounds", "Show Hits Only (Predicted Active)", "Show Active & Lipinski Pass Only", "Show Active & AMCS Space Pass Only", "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)"], horizontal=True)
-                
-                filtered_df = results_df.copy()
-                if view_selection == "Show Hits Only (Predicted Active)":
-                    filtered_df = filtered_df[filtered_df["Activity Prediction"] == "Active"]
-                elif view_selection == "Show Active & Lipinski Pass Only":
-                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass")]
-                elif view_selection == "Show Active & AMCS Space Pass Only":
-                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["AMCS Status"] == "Pass")]
-                elif view_selection == "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)":
-                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass") & (filtered_df["AMCS Status"] == "Pass")]
-                
-                st.write(f"Showing **{len(filtered_df):,}** matching compounds:")
-                st.dataframe(filtered_df.head(500), use_container_width=True)
-                st.download_button("📥 Download Export Dataset", data=filtered_df.to_csv(index=False).encode('utf-8'), file_name="malaria_leads_output.csv", mime="text/csv")
-            except Exception as batch_error:
-                st.error("❌ Processing pipeline error."); st.code(traceback.format_exc(), language="python")
+                try:
+                    with st.spinner("Processing large structural arrays..."):
+                        for chunk in pd.read_csv(uploaded_file, chunksize=5000):
+                            chunk = chunk.reset_index(drop=True)
+                            adme_data = list(chunk[target_col].apply(compute_adme_lipinski))
+                            adme_df = pd.DataFrame(adme_data, columns=['MW (Da)', 'LogP', 'H-Bond Donors', 'H-Bond Acceptors', 'Lipinski Status'])
+                            amcs_data = list(chunk[target_col].apply(get_datawarrior_aligned_amcs))
+                            amcs_df = pd.DataFrame(amcs_data, columns=['Basic Nitrogens', 'Aromatic Rings', 'cLogP', 'TPSA (Å²)', 'AMCS Status'])
+                            chunk = pd.concat([chunk, adme_df, amcs_df], axis=1)
+                            fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
+                            valid_mask = fingerprints.notna()
+                            chunk["Activity Prediction"], chunk["Probability Score"] = "Invalid Structure", "N/A"
+                            chunk["Mean Neighbor Distance"], chunk["Model APD Status"] = "N/A", "N/A"
+                            
+                            if valid_mask.any():
+                                X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
+                                preds = model.predict(X_screen)
+                                probs = model.predict_proba(X_screen)[:, 1]
+                                distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
+                                mean_distances = np.mean(distances, axis=1)
+                                chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
+                                chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
+                                chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
+                                chunk.loc[valid_mask, "Model APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
+                            
+                            processed_chunks.append(chunk)
+                            processed_rows += len(chunk)
+                            status_text.text(f"Processed records: {processed_rows:,}")
 
+                    progress_bar.progress(100)
+                    results_df = pd.concat(processed_chunks, ignore_index=True)
+                    
+                    st.markdown("#### 📊 Filtration Output Views")
+                    view_selection = st.radio("Select filter parameters:", ["Show All", "Hits Only (Predicted Active)", "Active & Lipinski Pass", "Active & AMCS Pass", "Elite Leads Only (All Pass)"], horizontal=True)
+                    
+                    filtered_df = results_df.copy()
+                    if view_selection == "Hits Only (Predicted Active)":
+                        filtered_df = filtered_df[filtered_df["Activity Prediction"] == "Active"]
+                    elif view_selection == "Active & Lipinski Pass":
+                        filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass")]
+                    elif view_selection == "Active & AMCS Pass":
+                        filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["AMCS Status"] == "Pass")]
+                    elif view_selection == "Elite Leads Only (All Pass)":
+                        filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass") & (filtered_df["AMCS Status"] == "Pass")]
+                    
+                    st.write(f"Showing **{len(filtered_df):,}** matches:")
+                    st.dataframe(filtered_df.head(500), use_container_width=True)
+                    st.download_button("📥 Download Export Dataset", data=filtered_df.to_csv(index=False).encode('utf-8'), file_name="malaria_leads_output.csv", mime="text/csv")
+                except Exception as batch_error:
+                    st.error("❌ High-throughput structural calculation error."); st.code(traceback.format_exc(), language="python")
+
+# ==============================================================================
+# MODEL METRICS VIEW TAB
+# ==============================================================================
 with tab_metrics:
     st.markdown("### 🧬 Machine Learning Performance Matrices")
     st.write("This web application implements a Random Forest Classifier featurized into **2048-bit ECFP4 fingerprints**. This is the updated implementation of our work:")
@@ -366,5 +381,5 @@ with tab_metrics:
     st.markdown("#### 🔬 Interpretation Definitions")
     st.info(r"""
     * **Lipinski's Rule of 5 (ADME Validation):** Evaluates overall structural drug-likeness based on basic pharmacokinetic property parameters (MW <= 500, LogP <= 5, HBD <= 5, HBA <= 10). Allows 1 threshold violation.
-    * **Antimalarial Chemical Space (AMCS Filters):** Implements specialized rule sets matching DataWarrior's logic optimization for identifying specific antimalarial properties (Basic Nitrogens >= 1, Aromatic Rings >= 2, cLogP >= 2.0, TPSA <= 80 Å²). 
+    * **Antimalarial Chemical Space (AMCS Filters):** Implements specialized rule sets matching DataWarrior's logic optimization for identifying specific antimalarial properties (Basic Nitrogens >= 1, Aromatic Rings >= 2, cLogP >= 2.0, TPSA <= 80 Å²). Allows 1 threshold violation.
     """)
