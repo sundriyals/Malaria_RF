@@ -141,7 +141,6 @@ def get_datawarrior_aligned_amcs(smiles):
                 
                 # Aliphatic Nitrogens (e.g., diethylamine tails)
                 if not atom.GetIsAromatic():
-                    # Exclude anilines / aromatic ring-bonded attachment points
                     if any(neighbor.GetIsAromatic() for neighbor in atom.GetNeighbors()):
                         continue
                     ban += 1
@@ -210,16 +209,18 @@ with tab_screen:
 
     st.write("### 🧪 Single Compound Quick Screen")
     
-    # Selection mechanism choosing input modes
     input_mode = st.radio("Choose Input Type:", ["Type / Paste SMILES String", "Draw Structure Molecule Canvas Editor"], horizontal=True)
     
     single_smiles = ""
     if input_mode == "Type / Paste SMILES String":
         single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine):", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
     else:
-        st.caption("ℹ️ Use the drawing tools below to sketch your candidate. Click the green 'Apply' checkmark button inside Ketcher's toolbar to automatically compute descriptors.")
-        # Launches the Ketcher canvas drawing interface, default pre-set to chloroquine configuration
-        single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
+        st.caption("ℹ️ Use the drawing tools below to sketch your candidate. Click the green 'Apply' checkmark inside Ketcher's toolbar to automatically compute descriptors.")
+        
+        # Split the screen into two columns. Put Ketcher in the first column to make it half width.
+        sketch_col, space_col = st.columns([1, 1])
+        with sketch_col:
+            single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
 
     if single_smiles:
         single_smiles = single_smiles.strip()
@@ -240,23 +241,31 @@ with tab_screen:
             
             st.markdown(f"**Identified SMILES Structure Context:** `{single_smiles}`")
             
-            st.markdown("#### 📊 Core Status Overview")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Predicted Class", activity_res)
-            col2.metric("Probability Score", f"{prob*100:.1f}%")
-            col3.metric("Model APD Domain", apd_res)
-            col4.metric("Lipinski Status", adme_res[4])
-            col5.metric("AMCS Space Status", amcs_res[4])
+            # 1. Core Model Performance Metrics Box
+            with st.container(border=True):
+                st.markdown("#### 🤖 Machine Learning Model Evaluation")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Predicted Activity Class", activity_res)
+                c2.metric("Probability Score Score", f"{prob*100:.1f}%")
+                c3.metric("Model APD Domain Range", apd_res)
             
-            st.markdown("#### 💊 Physicochemical Descriptor Profile Breakdown")
-            p1, p2, p3, p4, p5, p6, p7 = st.columns(7)
-            p1.metric("Mol Weight", f"{adme_res[0]} Da")
-            p2.metric("Lipophilicity (LogP)", adme_res[1])
-            p3.metric("H-Bond Donors", adme_res[2])
-            p4.metric("H-Bond Acceptors", adme_res[3])
-            p5.metric("Aromatic Rings", int(amcs_res[1]) if not np.isnan(amcs_res[1]) else "N/A")
-            p6.metric("Basic Nitrogens (BaN)", int(amcs_res[0]) if not np.isnan(amcs_res[0]) else "N/A")
-            p7.metric("TPSA Surface Area", f"{amcs_res[3]} Å²" if not np.isnan(amcs_res[3]) else "N/A")
+            # 2. Separated Box for Lipinski Parameters
+            with st.container(border=True):
+                st.markdown(f"#### 💊 Lipinski Rule of 5 Profile — Status: **{adme_res[4]}**")
+                l1, l2, l3, l4 = st.columns(4)
+                l1.metric("Mol Weight (<=500)", f"{adme_res[0]} Da")
+                l2.metric("Lipophilicity LogP (<=5)", adme_res[1])
+                l3.metric("H-Bond Donors (<=5)", adme_res[2])
+                l4.metric("H-Bond Acceptors (<=10)", adme_res[3])
+                
+            # 3. Separated Box for AMCS Parameters
+            with st.container(border=True):
+                st.markdown(f"#### 🧬 Antimalarial Chemical Space (AMCS) — Status: **{amcs_res[4]}**")
+                a1, a2, a3, a4 = st.columns(4)
+                a1.metric("Basic Nitrogens (BaN >= 1)", int(amcs_res[0]) if not np.isnan(amcs_res[0]) else "N/A")
+                a2.metric("Aromatic Rings (AR >= 2)", int(amcs_res[1]) if not np.isnan(amcs_res[1]) else "N/A")
+                a3.metric("Computed cLogP (>= 2.0)", amcs_res[2])
+                a4.metric("TPSA Surface Area (<= 80)", f"{amcs_res[3]} Å²" if not np.isnan(amcs_res[3]) else "N/A")
 
     st.markdown("---")
     st.write("### 📂 Batch File High-Throughput Screening")
