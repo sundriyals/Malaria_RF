@@ -278,10 +278,10 @@ with tab_screen:
 # TAB 2: MODEL DIAGNOSTICS & DOCUMENTATION
 # ------------------------------------------------------------------------------
 with tab_metrics:
-    st.markdown("### 🧬 Machine Learning Performance Diagnostics")
+    st.markdown("### 🧬 Machine Learning Performance Matrices")
     st.write("""
     This web application implements a robust **Random Forest Classifier** optimized to predict inhibitory activity against *Plasmodium falciparum*. 
-    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2.
+    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2. This model is the updated version of our previously published work: Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4 
     """)
     
     # Dataset Splits Block
@@ -328,7 +328,7 @@ with tab_metrics:
     st.markdown("---")
 
     # Informational Guide Rails for App Observers
-    st.markdown("#### 🔬 Interpretation Architecture")
+    st.markdown("#### 🔬 Interpretation")
     st.info("""
     * **ROC-AUC (Receiver Operating Characteristic):** Represents the probability that the model will rank a randomly chosen active compound higher than a randomly chosen inactive one. A value approaching 1.0 defines near-perfect separation properties.
     * **Applicability Domain (APD) Constraint Rules:** Predictive models are vulnerable when analyzing novel chemical families. Our $k$-Nearest Neighbors ($k$-NN) system evaluates geometric structural distances against our chemical space boundary of **0.6744**. Any compound scaling past this distance receives an *Unreliable* designation.
