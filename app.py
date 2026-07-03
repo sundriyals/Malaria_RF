@@ -261,4 +261,112 @@ with tab_screen:
             st.markdown("#### 💊 Physicochemical Descriptor Profile Breakdown")
             p1, p2, p3, p4, p5, p6 = st.columns(6)
             p1.metric("Mol Weight (MW)", f"{adme_res[0]} Da")
-            p2.metric("Lipophilicity (LogP
+            p2.metric("Lipophilicity (LogP)", adme_res[1])
+            p3.metric("H-Bond Donors", adme_res[2])
+            p4.metric("H-Bond Acceptors", adme_res[3])
+            p5.metric("Basic Nitrogens (BaN)", int(amcs_res[0]) if not np.isnan(amcs_res[0]) else "N/A")
+            p6.metric("TPSA (Surface Area)", f"{amcs_res[3]} Å²" if not np.isnan(amcs_res[3]) else "N/A")
+
+    st.markdown("---")
+
+    # --- BATCH HIGH-THROUGHPUT SCREEN ---
+    st.write("### 📂 Batch File High-Throughput Screening")
+    uploaded_file = st.file_uploader("Choose a CSV file to screen", type=["csv"])
+
+    if uploaded_file is not None:
+        try:
+            header_df = pd.read_csv(uploaded_file, nrows=2)
+            uploaded_file.seek(0) 
+        except Exception as e:
+            st.error(f"❌ Read Error: Could not parse CSV document structure. {e}")
+            st.stop()
+
+        smiles_col = [col for col in header_df.columns if col.lower() in ['smiles', 'smiles string', 'structure']]
+        
+        if not smiles_col:
+            st.error("❌ Column Error: Could not find a 'Smiles' or 'Structure' column header in your CSV file.")
+        else:
+            target_col = smiles_col[0]
+            st.success(f"Processing structural pipeline using column: '{target_col}'")
+            
+            processed_chunks = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            processed_rows = 0
+            
+            try:
+                with st.spinner("Streaming data matrices, evaluating ADME rules, and parsing DataWarrior AMCS spaces..."):
+                    for chunk in pd.read_csv(uploaded_file, chunksize=5000):
+                        chunk = chunk.reset_index(drop=True)
+                        
+                        # 1. Vectorized calculation of ADME parameters
+                        adme_data = list(chunk[target_col].apply(compute_adme_lipinski))
+                        adme_df = pd.DataFrame(adme_data, columns=['MW (Da)', 'LogP', 'H-Bond Donors', 'H-Bond Acceptors', 'Lipinski Status'])
+                        
+                        # 2. Vectorized calculation of DataWarrior-aligned AMCS fields
+                        amcs_data = list(chunk[target_col].apply(get_datawarrior_aligned_amcs))
+                        amcs_df = pd.DataFrame(amcs_data, columns=['Basic Nitrogens', 'Aromatic Rings', 'cLogP', 'TPSA (Å²)', 'AMCS Status'])
+                        
+                        # Concat generated property frames straight into chunk
+                        chunk = pd.concat([chunk, adme_df, amcs_df], axis=1)
+                        
+                        fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
+                        valid_mask = fingerprints.notna()
+                        
+                        # Set default placeholder baselines
+                        chunk["Activity Prediction"] = "Invalid SMILES structure"
+                        chunk["Probability Score"] = "N/A"
+                        chunk["Mean Neighbor Distance"] = "N/A"
+                        chunk["Model APD Status"] = "N/A"
+                        
+                        if valid_mask.any():
+                            X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
+                            
+                            preds = model.predict(X_screen)
+                            probs = model.predict_proba(X_screen)[:, 1]
+                            
+                            distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
+                            mean_distances = np.mean(distances, axis=1)
+                            
+                            # Row assignment back to data streams
+                            chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
+                            chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
+                            chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
+                            chunk.loc[valid_mask, "Model APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
+                        
+                        processed_chunks.append(chunk)
+                        processed_rows += len(chunk)
+                        status_text.text(f"Processed structural records: {processed_rows:,}")
+
+                progress_bar.progress(100)
+                status_text.text(f"Complete! Total evaluated compounds: {processed_rows:,}")
+                
+                results_df = pd.concat(processed_chunks, ignore_index=True)
+                
+                # --- INTERACTIVE DATA FILTRATION PANEL ---
+                st.markdown("### 📊 Dataset View Filter Configurations")
+                view_selection = st.radio(
+                    "Filter displayed data tracking rows:",
+                    [
+                        "Show All Checked Compounds", 
+                        "Show Hits Only (Predicted Active)", 
+                        "Show Active & Lipinski Pass Only",
+                        "Show Active & AMCS Space Pass Only",
+                        "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)"
+                    ],
+                    horizontal=True
+                )
+                
+                filtered_df = results_df.copy()
+                if view_selection == "Show Hits Only (Predicted Active)":
+                    filtered_df = filtered_df[filtered_df["Activity Prediction"] == "Active"]
+                    
+                elif view_selection == "Show Active & Lipinski Pass Only":
+                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass")]
+
+                elif view_selection == "Show Active & AMCS Space Pass Only":
+                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["AMCS Status"] == "Pass")]
+                    
+                elif view_selection == "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)":
+                    filtered_df = filtered_df[
+                        (filtered_df["Activity Prediction"]
