@@ -10,7 +10,7 @@ import traceback
 
 # Core Cheminformatics & Machine Learning Imports
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, Descriptors, Lipinski
 from sklearn.neighbors import NearestNeighbors
 
 # Silence scikit-learn's Jaccard boolean data conversion warnings safely
@@ -51,7 +51,7 @@ st.markdown("""
             box-shadow: 0px 4px 6px rgba(255, 75, 75, 0.2);
         }
         
-        /* Remove Streamlit's default ugly red underline indicator line */
+        /* Remove Streamlit's default red underline indicator line */
         div[data-testid="stTabs"] [data-baseweb="tab-highlight-bar"] {
             background-color: transparent !important;
         }
@@ -64,7 +64,7 @@ st.markdown("""
 APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
-# MOLECULAR FEATURIZATION PIPELINE
+# MOLECULAR FEATURIZATION & ADME PIPELINE
 # ==============================================================================
 def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
     """Converts a SMILES string into a 2048-bit binary ECFP4 fingerprint."""
@@ -91,6 +91,34 @@ def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
         return arr
     except Exception:
         return None
+
+def compute_adme_lipinski(smiles):
+    """Computes quantitative Lipinski descriptors and assigns a Pass/Fail status."""
+    try:
+        smiles = str(smiles).strip()
+        if not smiles or smiles == "nan" or smiles.lower() == "none":
+            return [np.nan, np.nan, np.nan, np.nan, "Invalid Structure"]
+            
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return [np.nan, np.nan, np.nan, np.nan, "Invalid Structure"]
+        
+        mw = Descriptors.MolWt(mol)
+        logp = Descriptors.MolLogP(mol)
+        hbd = Lipinski.NumHDonors(mol)
+        hba = Lipinski.NumHAcceptors(mol)
+        
+        # Lipinski Rule Violations Calculation (Max 1 violation allowed to pass)
+        violations = 0
+        if mw > 500: violations += 1
+        if logp > 5: violations += 1
+        if hbd > 5: violations += 1
+        if hba > 10: violations += 1
+        
+        pass_fail = "Pass" if violations <= 1 else "Fail"
+        return [round(mw, 2), round(logp, 2), hbd, hba, pass_fail]
+    except Exception:
+        return [np.nan, np.nan, np.nan, np.nan, "Calculation Error"]
 
 # ==============================================================================
 # MODEL & APD LOADING ENGINE
@@ -157,19 +185,20 @@ tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validati
 with tab_screen:
     st.markdown(f"""
     Upload screening candidates containing structural **SMILES** strings to generate machine learning predictions. 
-    All calculations are backed by an automated **Applicability Domain (Apd)** validation metric.
+    All calculations are backed by an automated **Applicability Domain (Apd)** validation metric and **Lipinski Rule of 5** ADME filtration.
     * **Active APD Threshold Limit:** `{APD_THRESHOLD_CONSTANT:.4f}`
     """)
 
     # --- SINGLE COMPOUND SCREEN ---
     st.write("### 🧪 Single Compound Quick Screen")
-    single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC:")
+    single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine): CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
 
     if single_smiles:
         single_smiles = single_smiles.strip()
         fp = smiles_to_ecfp4(single_smiles)
+        adme_res = compute_adme_lipinski(single_smiles)
         
-        if fp is None:
+        if fp is None or adme_res[4] == "Invalid Structure":
             st.error("❌ Invalid SMILES structure string. Please verify chemical notation.")
         else:
             X_single = np.array([fp])
@@ -183,15 +212,19 @@ with tab_screen:
             activity_res = "Active" if pred == 1 else "Inactive"
             apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
             
+            st.markdown("#### 📊 Screening Summary")
             col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric(label="Predicted Class", value=activity_res)
-            with col2:
-                st.metric(label="Probability Score", value=f"{prob*100:.1f}%")
-            with col3:
-                st.metric(label="Calculated Distance", value=f"{mean_dist:.4f}")
-            with col4:
-                st.metric(label="APD Status", value=apd_res)
+            col1.metric(label="Predicted Class", value=activity_res)
+            col2.metric(label="Probability Score", value=f"{prob*100:.1f}%")
+            col3.metric(label="APD Status", value=apd_res)
+            col4.metric(label="Lipinski ADME Status", value=adme_res[4])
+            
+            st.markdown("#### 💊 Core Physicochemical Properties")
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Mol Weight (MW)", f"{adme_res[0]} Da")
+            p2.metric("LogP (Lipophilicity)", adme_res[1])
+            p3.metric("H-Bond Donors", adme_res[2])
+            p4.metric("H-Bond Acceptors", adme_res[3])
 
     st.markdown("---")
 
@@ -221,11 +254,17 @@ with tab_screen:
             processed_rows = 0
             
             try:
-                with st.spinner("Streaming chemical spaces and processing APD constraints..."):
+                with st.spinner("Streaming chemical spaces, evaluating ADME rules, and processing APD constraints..."):
                     for chunk in pd.read_csv(uploaded_file, chunksize=5000):
                         chunk = chunk.reset_index(drop=True)
                         
-                        # High-speed vectorized fingerprint calculation
+                        # High-speed vectorized calculation of ADME parameters
+                        adme_data = list(chunk[target_col].apply(compute_adme_lipinski))
+                        adme_df = pd.DataFrame(adme_data, columns=['MW (Da)', 'LogP', 'H-Bond Donors', 'H-Bond Acceptors', 'Lipinski Status'])
+                        
+                        # Bind properties to core chunk row index
+                        chunk = pd.concat([chunk, adme_df], axis=1)
+                        
                         fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
                         valid_mask = fingerprints.notna()
                         
@@ -244,7 +283,7 @@ with tab_screen:
                             distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
                             mean_distances = np.mean(distances, axis=1)
                             
-                            # Vectorized assignment back into dataframe
+                            # Vectorized assignment back into chunk dataframe
                             chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
                             chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
                             chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
@@ -259,14 +298,28 @@ with tab_screen:
                 
                 results_df = pd.concat(processed_chunks, ignore_index=True)
                 
-                st.write("### 📊 Screening Preview Results (First 500 Records)")
-                st.dataframe(results_df.head(500), use_container_width=True)
+                # --- INTERACTIVE DATA FILTRATION PANEL ---
+                st.markdown("### 📊 Dataset View Filter Configurations")
+                view_selection = st.radio(
+                    "Filter displayed data tracking rows:",
+                    ["Show All Checked Compounds", "Show Hits Only (Predicted Active)", "Show Orally Bioavailable Hits Only (Active & Lipinski Pass)"],
+                    horizontal=True
+                )
                 
-                csv_export = results_df.to_csv(index=False).encode('utf-8')
+                filtered_df = results_df.copy()
+                if view_selection == "Show Hits Only (Predicted Active)":
+                    filtered_df = filtered_df[filtered_df["Activity Prediction"] == "Active"]
+                elif view_selection == "Show Orally Bioavailable Hits Only (Active & Lipinski Pass)":
+                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass")]
+                
+                st.write(f"Showing **{len(filtered_df):,}** matching compounds:")
+                st.dataframe(filtered_df.head(500), use_container_width=True)
+                
+                csv_export = filtered_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Download Complete Screened Compounds Table",
+                    label="📥 Download Sorted Filtering Dataset",
                     data=csv_export,
-                    file_name="malaria_screening_results.csv",
+                    file_name="malaria_adme_filtered_results.csv",
                     mime="text/csv"
                 )
                 
@@ -320,7 +373,6 @@ with tab_metrics:
 
     with col_matrix:
         st.write("**Confusion Matrix Contingency Layout:**")
-        # Interactive pandas table representing the matrix data directly from your matrix graphic
         matrix_data = {
             "Predicted Inactive (0)": ["True Inactives (TN): 1,568", "False Inactives (FN): 179"],
             "Predicted Active (1)": ["False Actives (FP): 48", "True Actives (TP): 1,229"]
