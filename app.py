@@ -57,7 +57,7 @@ st.markdown("""
 APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
-# MOLECULAR FEATURIZATION & PROPERTY ENGINE (Option B: DataWarrior Aligned)
+# MOLECULAR FEATURIZATION & PROPERTY ENGINE
 # ==============================================================================
 def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
     """Converts a SMILES string into a 2048-bit binary ECFP4 fingerprint."""
@@ -104,24 +104,48 @@ def compute_adme_lipinski(smiles):
         return [np.nan, np.nan, np.nan, np.nan, "Calculation Error"]
 
 def get_datawarrior_aligned_amcs(smiles):
-    """Calculates DataWarrior chemical filters (BaN >= 1, AR >= 2, cLogP >= 2.0, TPSA <= 80.0)"""
+    """Calculates DataWarrior chemical filters via atom-by-atom validation (BaN >= 1, AR >= 2, cLogP >= 2.0, TPSA <= 80.0)"""
     try:
         smiles = str(smiles).strip()
         if not smiles or smiles == "nan" or smiles.lower() == "none":
             return [np.nan, np.nan, np.nan, np.nan, "Invalid Structure"]
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
+            mol = Chem.MolFromSmiles(smiles, sanitize=False)
+            if mol is not None:
+                mol.UpdatePropertyCache(strict=False)
+                Chem.FastFindRings(mol)
+        if mol is None:
             return [np.nan, np.nan, np.nan, np.nan, "Invalid Structure"]
+            
         clogp = round(Descriptors.MolLogP(mol), 2)
         tpsa = round(Descriptors.TPSA(mol), 2)
         ar = Descriptors.NumAromaticRings(mol)
         
-        # Fixed SMARTS tracking combining aliphatic basic amines and quinoline/pyridine fragments
-        ban_smarts = Chem.MolFromSmarts(
-            "[NX3;H2,H1,H0;!$(NC=O);!$(NS=O);!$(NC=S);!$(NC=N)]"
-            "|[nX2;H0;$(n1ccccc1),$(n1ccc2ccccc21)]"
-        )
-        ban = len(mol.GetSubstructMatches(ban_smarts)) if ban_smarts else 0
+        # Non-basic nitrogen environment exclusions
+        amide_smarts = Chem.MolFromSmarts("[NX3][CX3](=[OX1,SX1])")
+        sulfonamide_smarts = Chem.MolFromSmarts("[NX3][SX4](=[OX1])(=[OX1])")
+        nitro_smarts = Chem.MolFromSmarts("[NX3](=[OX1])=[OX1]")
+        
+        amide_matches = set(x[0] for x in mol.GetSubstructMatches(amide_smarts)) if amide_smarts else set()
+        sulfonamide_matches = set(x[0] for x in mol.GetSubstructMatches(sulfonamide_smarts)) if sulfonamide_smarts else set()
+        nitro_matches = set(x[0] for x in mol.GetSubstructMatches(nitro_smarts)) if nitro_smarts else set()
+        
+        ban = 0
+        for atom in mol.GetAtoms():
+            if atom.GetAtomicNum() == 7:  # Nitrogen check
+                idx = atom.GetIdx()
+                if idx in amide_matches or idx in sulfonamide_matches or idx in nitro_matches:
+                    continue
+                
+                # Aliphatic Nitrogens (e.g., diethylamine tails)
+                if not atom.GetIsAromatic():
+                    ban += 1
+                # Aromatic Nitrogens (e.g., pyridines/quinolines where connection degree == 2)
+                else:
+                    if atom.GetDegree() == 2:
+                        ban += 1
+                        
         is_amcs_pass = (ban >= 1) and (ar >= 2) and (clogp >= 2.0) and (tpsa <= 80.0)
         amcs_status = "Pass" if is_amcs_pass else "Fail"
         return [ban, ar, clogp, tpsa, amcs_status]
