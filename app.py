@@ -140,6 +140,9 @@ def get_datawarrior_aligned_amcs(smiles):
                 
                 # Aliphatic Nitrogens (e.g., diethylamine tails)
                 if not atom.GetIsAromatic():
+                    # Exclude anilines/aryl-amines (nitrogens connected directly to an aromatic ring)
+                    if any(neighbor.GetIsAromatic() for neighbor in atom.GetNeighbors()):
+                        continue
                     ban += 1
                 # Aromatic Nitrogens (e.g., pyridines/quinolines where connection degree == 2)
                 else:
