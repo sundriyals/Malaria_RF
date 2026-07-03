@@ -8,7 +8,7 @@ import urllib.error
 import warnings
 import traceback
 
-# Core Cheminformatics & Machine Learning Imports (RESTORED)
+# Core Cheminformatics & Machine Learning Imports
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from sklearn.neighbors import NearestNeighbors
@@ -36,7 +36,7 @@ def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
             
         mol = Chem.MolFromSmiles(smiles)
         
-        # Fallback for complex structures
+        # Fallback for complex structures (e.g., hypervalent sulfoxides)
         if mol is None:
             mol = Chem.MolFromSmiles(smiles, sanitize=False)
             if mol is not None:
@@ -105,132 +105,192 @@ except Exception as e:
     st.stop()
 
 # ==============================================================================
-# USER INTERFACE LAYOUT
+# USER INTERFACE LAYOUT (TABBED DESIGN)
 # ==============================================================================
 st.title("🔬 Anti-Plasmodial Activity & APD Screening Portal")
-st.markdown(f"""
-Upload screening candidates containing structural **SMILES** strings to generate machine learning predictions. 
-All calculations are backed by an automated **Applicability Domain (APD)** validation metric.
-* **Active APD Threshold Limit:** `{APD_THRESHOLD_CONSTANT:.4f}`
-""")
 
-# ==============================================================================
-# SINGLE COMPOUND QUICK SCREEN
-# ==============================================================================
-st.write("### 🧪 Single Compound Quick Screen")
-single_smiles = st.text_input("Paste a single SMILES string here (e.g., CC1CC2C3CCC4=CC(=O)C=CC4(C)C3(F)C(O)CC2(C)C1(O)C(=O)CO):")
+# Split web portal into distinct interactive views
+tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validation & Metrics"])
 
-if single_smiles:
-    single_smiles = single_smiles.strip()
-    fp = smiles_to_ecfp4(single_smiles)
-    
-    if fp is None:
-        st.error("❌ Invalid SMILES structure string. Please verify chemical notation.")
-    else:
-        X_single = np.array([fp])
-        
-        pred = model.predict(X_single)[0]
-        prob = model.predict_proba(X_single)[0][1]
-        
-        dist, _ = nn_engine.kneighbors(X_single, n_neighbors=5)
-        mean_dist = np.mean(dist)
-        
-        activity_res = "Active" if pred == 1 else "Inactive"
-        apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric(label="Predicted Class", value=activity_res)
-        with col2:
-            st.metric(label="Probability Score", value=f"{prob*100:.1f}%")
-        with col3:
-            st.metric(label="Calculated Distance", value=f"{mean_dist:.4f}")
-        with col4:
-            st.metric(label="APD Status", value=apd_res)
+# ------------------------------------------------------------------------------
+# TAB 1: ACTIVE SCREENING UTILITIES
+# ------------------------------------------------------------------------------
+with tab_screen:
+    st.markdown(f"""
+    Upload screening candidates containing structural **SMILES** strings to generate machine learning predictions. 
+    All calculations are backed by an automated **Applicability Domain (APD)** validation metric.
+    * **Active APD Threshold Limit:** `{APD_THRESHOLD_CONSTANT:.4f}`
+    """)
 
-st.markdown("---")
+    # --- SINGLE COMPOUND SCREEN ---
+    st.write("### 🧪 Single Compound Quick Screen")
+    single_smiles = st.text_input("Paste a single SMILES string here (e.g., CC1CC2C3CCC4=CC(=O)C=CC4(C)C3(F)C(O)CC2(C)C1(O)C(=O)CO):")
 
-# ==============================================================================
-# BATCH FILE HIGH-THROUGHPUT PROCESSING PORTAL
-# ==============================================================================
-st.write("### 📂 Batch File High-Throughput Screening")
-uploaded_file = st.file_uploader("Choose a CSV file to screen", type=["csv"])
-
-if uploaded_file is not None:
-    try:
-        header_df = pd.read_csv(uploaded_file, nrows=2)
-        uploaded_file.seek(0) 
-    except Exception as e:
-        st.error(f"❌ Read Error: Could not parse CSV document structure. {e}")
-        st.stop()
-
-    smiles_col = [col for col in header_df.columns if col.lower() in ['smiles', 'smiles string', 'structure']]
-    
-    if not smiles_col:
-        st.error("❌ Column Error: Could not find a 'Smiles' or 'Structure' column header in your CSV file.")
-    else:
-        target_col = smiles_col[0]
-        st.success(f"Processing structural pipeline using column: '{target_col}'")
+    if single_smiles:
+        single_smiles = single_smiles.strip()
+        fp = smiles_to_ecfp4(single_smiles)
         
-        processed_chunks = []
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        processed_rows = 0
-        
+        if fp is None:
+            st.error("❌ Invalid SMILES structure string. Please verify chemical notation.")
+        else:
+            X_single = np.array([fp])
+            
+            pred = model.predict(X_single)[0]
+            prob = model.predict_proba(X_single)[0][1]
+            
+            dist, _ = nn_engine.kneighbors(X_single, n_neighbors=5)
+            mean_dist = np.mean(dist)
+            
+            activity_res = "Active" if pred == 1 else "Inactive"
+            apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric(label="Predicted Class", value=activity_res)
+            with col2:
+                st.metric(label="Probability Score", value=f"{prob*100:.1f}%")
+            with col3:
+                st.metric(label="Calculated Distance", value=f"{mean_dist:.4f}")
+            with col4:
+                st.metric(label="APD Status", value=apd_res)
+
+    st.markdown("---")
+
+    # --- BATCH HIGH-THROUGHPUT SCREEN ---
+    st.write("### 📂 Batch File High-Throughput Screening")
+    uploaded_file = st.file_uploader("Choose a CSV file to screen", type=["csv"])
+
+    if uploaded_file is not None:
         try:
-            with st.spinner("Streaming chemical spaces and processing APD constraints..."):
-                for chunk in pd.read_csv(uploaded_file, chunksize=5000):
-                    chunk = chunk.reset_index(drop=True)
-                    
-                    # Compute fingerprints rapidly using pandas .apply()
-                    fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
-                    valid_mask = fingerprints.notna()
-                    
-                    # Create default placeholder columns preserving original user data
-                    chunk["Activity Prediction"] = "Invalid SMILES structure"
-                    chunk["Probability Score"] = "N/A"
-                    chunk["Mean Neighbor Distance"] = "N/A"
-                    chunk["APD Status"] = "N/A"
-                    
-                    if valid_mask.any():
-                        # Extract only valid fingerprints to run ML on
-                        X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
-                        
-                        # Generate batch predictions
-                        preds = model.predict(X_screen)
-                        probs = model.predict_proba(X_screen)[:, 1]
-                        
-                        distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
-                        mean_distances = np.mean(distances, axis=1)
-                        
-                        # Vectorized formatting assignments back into the dataframe structure
-                        chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
-                        chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
-                        chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
-                        chunk.loc[valid_mask, "APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
-                    
-                    processed_chunks.append(chunk)
-                    processed_rows += len(chunk)
-                    status_text.text(f"Processed structural records: {processed_rows:,}")
+            header_df = pd.read_csv(uploaded_file, nrows=2)
+            uploaded_file.seek(0) 
+        except Exception as e:
+            st.error(f"❌ Read Error: Could not parse CSV document structure. {e}")
+            st.stop()
 
-            progress_bar.progress(100)
-            status_text.text(f"Complete! Total evaluated compounds: {processed_rows:,}")
+        smiles_col = [col for col in header_df.columns if col.lower() in ['smiles', 'smiles string', 'structure']]
+        
+        if not smiles_col:
+            st.error("❌ Column Error: Could not find a 'Smiles' or 'Structure' column header in your CSV file.")
+        else:
+            target_col = smiles_col[0]
+            st.success(f"Processing structural pipeline using column: '{target_col}'")
             
-            # Combine the processed chunks smoothly
-            results_df = pd.concat(processed_chunks, ignore_index=True)
+            processed_chunks = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            processed_rows = 0
             
-            st.write("### 📊 Screening Preview Results (First 500 Records)")
-            st.dataframe(results_df.head(500), use_container_width=True)
-            
-            # Memory-efficient download extraction
-            csv_export = results_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Complete Screened Compounds Table",
-                data=csv_export,
-                file_name="malaria_screening_results.csv",
-                mime="text/csv"
-            )
-            
-        except Exception as batch_error:
-            st.error("❌ An unexpected pipeline tracking error occurred during processing.")
-            st.code(traceback.format_exc(), language="python")
+            try:
+                with st.spinner("Streaming chemical spaces and processing APD constraints..."):
+                    for chunk in pd.read_csv(uploaded_file, chunksize=5000):
+                        chunk = chunk.reset_index(drop=True)
+                        
+                        # High-speed vectorized fingerprint calculation
+                        fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
+                        valid_mask = fingerprints.notna()
+                        
+                        # Set default placeholder baselines
+                        chunk["Activity Prediction"] = "Invalid SMILES structure"
+                        chunk["Probability Score"] = "N/A"
+                        chunk["Mean Neighbor Distance"] = "N/A"
+                        chunk["APD Status"] = "N/A"
+                        
+                        if valid_mask.any():
+                            X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
+                            
+                            preds = model.predict(X_screen)
+                            probs = model.predict_proba(X_screen)[:, 1]
+                            
+                            distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
+                            mean_distances = np.mean(distances, axis=1)
+                            
+                            # Vectorized assignment back into dataframe
+                            chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
+                            chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
+                            chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
+                            chunk.loc[valid_mask, "APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
+                        
+                        processed_chunks.append(chunk)
+                        processed_rows += len(chunk)
+                        status_text.text(f"Processed structural records: {processed_rows:,}")
+
+                progress_bar.progress(100)
+                status_text.text(f"Complete! Total evaluated compounds: {processed_rows:,}")
+                
+                results_df = pd.concat(processed_chunks, ignore_index=True)
+                
+                st.write("### 📊 Screening Preview Results (First 500 Records)")
+                st.dataframe(results_df.head(500), use_container_width=True)
+                
+                csv_export = results_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Complete Screened Compounds Table",
+                    data=csv_export,
+                    file_name="malaria_screening_results.csv",
+                    mime="text/csv"
+                )
+                
+            except Exception as batch_error:
+                st.error("❌ An unexpected pipeline tracking error occurred during processing.")
+                st.code(traceback.format_exc(), language="python")
+
+# ------------------------------------------------------------------------------
+# TAB 2: MODEL DIAGNOSTICS & DOCUMENTATION
+# ------------------------------------------------------------------------------
+with tab_metrics:
+    st.markdown("### 🧬 Machine Learning Performance Diagnostics")
+    st.write("""
+    This web application implements a robust **Random Forest Classifier** optimized to predict inhibitory activity against *Plasmodium falciparum*. 
+    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2.
+    """)
+    
+    # Dataset Splits Block
+    st.markdown("#### 📐 Dataset Stratification")
+    col_data1, col_data2, col_data3 = st.columns(3)
+    with col_data1:
+        st.metric(label="Total Compounds Ensembled", value="X,XXX")  # <-- Change to your exact dataset count
+    with col_data2:
+        st.metric(label="Training Set Size (80%)", value="X,XXX")    # <-- Change to your training row count
+    with col_data3:
+        st.metric(label="Independent Test Set Size (20%)", value="XXX")  # <-- Change to your test row count
+
+    st.markdown("---")
+
+    # Classification Performance & Metrics Matrix
+    st.markdown("#### 🎯 Classification Performance")
+    col_perf, col_matrix = st.columns(2)
+    
+    with col_perf:
+        st.write("**Core Statistical Indicators:**")
+        st.write("- **Area Under the ROC Curve (ROC-AUC):** `0.XX`")  # <-- Update placeholder
+        st.write("- **Sensitivity / Recall (True Active Rate):** `XX.X%`") # <-- Update placeholder
+        st.write("- **Specificity (True Inactive Rate):** `XX.X%`")      # <-- Update placeholder
+        st.write("- **Precision (Positive Predictive Value):** `XX.X%`") # <-- Update placeholder
+        st.write("- **Matthews Correlation Coefficient (MCC):** `0.XX`") # <-- Update placeholder
+        
+        # Display the ROC Curve Image dynamically
+        st.write("**Validation Curve Graphic:**")
+        if os.path.exists("roc_curve.png"):
+            st.image("roc_curve.png", caption="Receiver Operating Characteristic (ROC) Curve - Test Set Evaluation", use_container_width=True)
+        else:
+            st.warning("⚠️ 'roc_curve.png' file not detected in root directory. Please upload your graphic asset to GitHub.")
+
+    with col_matrix:
+        st.write("**Confusion Matrix Contingency Layout:**")
+        # Creating a neat interactive pandas table representing model predictions
+        matrix_data = {
+            "Predicted Inactive": ["True Inactives (TN): XXX", "False Inactives (FN): XX"], # <-- Replace placeholder strings
+            "Predicted Active": ["False Actives (FP): XX", "True Actives (TP): XXX"]      # <-- Replace placeholder strings
+        }
+        matrix_df = pd.DataFrame(matrix_data, index=["Actual Inactive", "Actual Active"])
+        st.dataframe(matrix_df, use_container_width=True)
+
+    st.markdown("---")
+
+    # Informational Guide Rails for App Observers
+    st.markdown("#### 🔬 Interpretation Architecture")
+    st.info("""
+    * **ROC-AUC (Receiver Operating Characteristic):** Represents the probability that the model will rank a randomly chosen active compound higher than a randomly chosen inactive one. A value approaching 1.0 defines near-perfect separation properties.
+    * **Applicability Domain (APD) Constraint Rules:** Predictive models are vulnerable when analyzing novel chemical families. Our $k$-Nearest Neighbors ($k$-NN) system evaluates geometric structural distances against our chemical space boundary of **0.6744**. Any compound scaling past this distance receives an *Unreliable* designation.
+    """)
