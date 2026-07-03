@@ -8,10 +8,11 @@ import urllib.error
 import warnings
 import traceback
 
-# Core Cheminformatics & Machine Learning Imports
+# Core Cheminformatics, Machine Learning, & Drawing UI Imports
 from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors, Lipinski
 from sklearn.neighbors import NearestNeighbors
+from streamlit_ketcher import st_ketcher
 
 # Silence scikit-learn's Jaccard boolean data conversion warnings safely
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
@@ -140,7 +141,7 @@ def get_datawarrior_aligned_amcs(smiles):
                 
                 # Aliphatic Nitrogens (e.g., diethylamine tails)
                 if not atom.GetIsAromatic():
-                    # Exclude anilines/aryl-amines (nitrogens connected directly to an aromatic ring)
+                    # Exclude anilines / aromatic ring-bonded attachment points
                     if any(neighbor.GetIsAromatic() for neighbor in atom.GetNeighbors()):
                         continue
                     ban += 1
@@ -208,7 +209,17 @@ with tab_screen:
     st.markdown(f"Upload screening candidates containing structural **SMILES** strings to evaluate anti-malarial properties. Compounds are prioritized via ML engines, **Lipinski rules**, and DataWarrior **AMCS parameters**.\n* **Model APD Threshold Boundary:** `{APD_THRESHOLD_CONSTANT:.4f}`")
 
     st.write("### 🧪 Single Compound Quick Screen")
-    single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine):", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
+    
+    # Selection mechanism choosing input modes
+    input_mode = st.radio("Choose Input Type:", ["Type / Paste SMILES String", "Draw Structure Molecule Canvas Editor"], horizontal=True)
+    
+    single_smiles = ""
+    if input_mode == "Type / Paste SMILES String":
+        single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine):", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
+    else:
+        st.caption("ℹ️ Use the drawing tools below to sketch your candidate. Click the green 'Apply' checkmark button inside Ketcher's toolbar to automatically compute descriptors.")
+        # Launches the Ketcher canvas drawing interface, default pre-set to chloroquine configuration
+        single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
 
     if single_smiles:
         single_smiles = single_smiles.strip()
@@ -217,7 +228,7 @@ with tab_screen:
         amcs_res = get_datawarrior_aligned_amcs(single_smiles)
         
         if fp is None or adme_res[4] == "Invalid Structure" or amcs_res[4] == "Invalid Structure":
-            st.error("❌ Invalid SMILES structure string. Please verify chemical notation.")
+            st.error("❌ Invalid SMILES structure string. Please verify chemical notation or ensure the drawing canvas is not empty.")
         else:
             X_single = np.array([fp])
             pred = model.predict(X_single)[0]
@@ -226,6 +237,8 @@ with tab_screen:
             mean_dist = np.mean(dist)
             activity_res = "Active" if pred == 1 else "Inactive"
             apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
+            
+            st.markdown(f"**Identified SMILES Structure Context:** `{single_smiles}`")
             
             st.markdown("#### 📊 Core Status Overview")
             col1, col2, col3, col4, col5 = st.columns(5)
