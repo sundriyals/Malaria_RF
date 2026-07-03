@@ -368,5 +368,60 @@ with tab_screen:
                     filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["AMCS Status"] == "Pass")]
                     
                 elif view_selection == "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)":
-                    filtered_df = filtered_df[
-                        (filtered_df["Activity Prediction"]
+                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass") & (filtered_df["AMCS Status"] == "Pass")]
+                
+                st.write(f"Showing **{len(filtered_df):,}** matching compounds:")
+                st.dataframe(filtered_df.head(500), use_container_width=True)
+                
+                csv_export = filtered_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Sorted Filtering Dataset",
+                    data=csv_export,
+                    file_name="malaria_filtered_leads_output.csv",
+                    mime="text/csv"
+                )
+                
+            except Exception as batch_error:
+                st.error("❌ An unexpected pipeline tracking error occurred during processing.")
+                st.code(traceback.format_exc(), language="python")
+
+# ------------------------------------------------------------------------------
+# TAB 2: MODEL DIAGNOSTICS & GRAPHICS
+# ------------------------------------------------------------------------------
+with tab_metrics:
+    st.markdown("### 🧬 Machine Learning Performance Matrices")
+    st.write(r"""
+    This web application implements a robust **Random Forest Classifier** optimized to predict inhibitory activity against *Plasmodium falciparum*. 
+    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2. 
+    This model is the updated version of our previously published work:
+    """)
+    
+    st.markdown(":red[Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4]")
+    
+    st.markdown("#### 📐 Dataset Stratification")
+    col_data1, col_data2, col_data3 = st.columns(3)
+    with col_data1:
+        st.metric(label="Total Compounds Ensembled", value="15,118")
+    with col_data2:
+        st.metric(label="Training Set Size (80%)", value="12,094")
+    with col_data3:
+        st.metric(label="Independent Test Set Size (20%)", value="3,024")
+
+    st.markdown("---")
+
+    st.markdown("#### 🎯 Classification Performance")
+    col_perf, col_matrix = st.columns(2)
+    
+    with col_perf:
+        st.write("**Core Statistical Indicators (Test Set Validation):**")
+        st.write("- **Area Under the ROC Curve (ROC-AUC):** `0.97` (Highly Discriminative)")
+        st.write("- **Sensitivity / Recall (True Active Rate):** `87.3%`")
+        st.write("- **Specificity (True Inactive Rate):** `97.0%`")
+        st.write("- **Precision (Positive Predictive Value):** `96.2%`")
+        st.write("- **Matthews Correlation Coefficient (MCC):** `0.85`")
+        
+        st.write("**Validation Curve Graphic:**")
+        if os.path.exists("roc_curve.png"):
+            st.image("roc_curve.png", caption="Receiver Operating Characteristic (ROC) Curve - Test Set Evaluation", use_container_width=True)
+        else:
+            st.warning("⚠️ 'roc_curve.png' file not detected in
