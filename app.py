@@ -11,6 +11,7 @@ import traceback
 # Core Cheminformatics & Machine Learning Imports
 from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors, Lipinski
+
 from sklearn.neighbors import NearestNeighbors
 
 # Silence scikit-learn's Jaccard boolean data conversion warnings safely
@@ -64,7 +65,7 @@ st.markdown("""
 APD_THRESHOLD_CONSTANT = 0.6744
 
 # ==============================================================================
-# MOLECULAR FEATURIZATION & ADME PIPELINE
+# MOLECULAR FEATURIZATION & PROPERTY ENGINE (Option B: DataWarrior Aligned)
 # ==============================================================================
 def smiles_to_ecfp4(smiles, radius=2, nBits=2048):
     """Converts a SMILES string into a 2048-bit binary ECFP4 fingerprint."""
@@ -117,6 +118,43 @@ def compute_adme_lipinski(smiles):
         
         pass_fail = "Pass" if violations <= 1 else "Fail"
         return [round(mw, 2), round(logp, 2), hbd, hba, pass_fail]
+    except Exception:
+        return [np.nan, np.nan, np.nan, np.nan, "Calculation Error"]
+
+def get_datawarrior_aligned_amcs(smiles):
+    """
+    Calculates molecular properties matching DataWarrior's internal 
+    cheminformatics engine parameters for explicit AMCS evaluation.
+    Criteria: Basic Nitrogens >= 1, Aromatic Rings >= 2, cLogP >= 2.0, TPSA <= 80.0
+    """
+    try:
+        smiles = str(smiles).strip()
+        if not smiles or smiles == "nan" or smiles.lower() == "none":
+            return [np.nan, np.nan, np.nan, np.nan, "Invalid Structure"]
+            
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return [np.nan, np.nan, np.nan, np.nan, "Invalid Structure"]
+        
+        # 1. cLogP & TPSA (Wildman-Crippen calculations matching DataWarrior frameworks)
+        clogp = round(Descriptors.MolLogP(mol), 2)
+        tpsa = round(Descriptors.TPSA(mol), 2)
+        
+        # 2. Aromatic Rings (AR)
+        ar = Descriptors.NumAromaticRings(mol)
+        
+        # 3. Basic Nitrogens (BaN) - Implements DataWarrior valence check matching rules
+        ban_smarts = Chem.MolFromSmarts(
+            "[$([NX3;H2,H1,H0;!$(NC=O);!$(NS=O);!$(NC=S);!$(N=C)]);"
+            "$([nX2;H0;$(n1ccccc1),$(n1c[nH]cc1)])]"
+        )
+        ban = len(mol.GetSubstructMatches(ban_smarts)) if ban_smarts else 0
+        
+        # Strict evaluation intersection: All properties must comply
+        is_amcs_pass = (ban >= 1) and (ar >= 2) and (clogp >= 2.0) and (tpsa <= 80.0)
+        amcs_status = "Pass" if is_amcs_pass else "Fail"
+        
+        return [ban, ar, clogp, tpsa, amcs_status]
     except Exception:
         return [np.nan, np.nan, np.nan, np.nan, "Calculation Error"]
 
@@ -174,19 +212,19 @@ except Exception as e:
 # ==============================================================================
 # USER INTERFACE LAYOUT (TABBED DESIGN)
 # ==============================================================================
-st.title("🔬 Anti-Plasmodial Activity & APD Screening Portal")
+st.title("🔬 Anti-Plasmodial Activity & Property Profiling Portal")
 
-# Split web portal into distinct interactive views (now styled as buttons)
 tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validation & Metrics"])
 
 # ------------------------------------------------------------------------------
-# TAB 1: ACTIVE SCREENING UTILITIES
+# TAB 1: SCREENING INTERACTIVE ENGINE
 # ------------------------------------------------------------------------------
 with tab_screen:
     st.markdown(f"""
-    Upload screening candidates containing structural **SMILES** strings to generate machine learning predictions. 
-    All calculations are backed by an automated **Applicability Domain (Apd)** validation metric and **Lipinski Rule of 5** ADME filtration.
-    * **Active APD Threshold Limit:** `{APD_THRESHOLD_CONSTANT:.4f}`
+    Upload screening candidates containing structural **SMILES** strings to evaluate anti-malarial properties. 
+    Compounds are simultaneously prioritized via machine learning pipelines, **Lipinski's Rule of 5 ADME parameters**, 
+    and specialized **DataWarrior Antimalarial Chemical Space (AMCS)** rules.
+    * **Active Model APD Threshold Boundary:** `{APD_THRESHOLD_CONSTANT:.4f}`
     """)
 
     # --- SINGLE COMPOUND SCREEN ---
@@ -197,8 +235,9 @@ with tab_screen:
         single_smiles = single_smiles.strip()
         fp = smiles_to_ecfp4(single_smiles)
         adme_res = compute_adme_lipinski(single_smiles)
+        amcs_res = get_datawarrior_aligned_amcs(single_smiles)
         
-        if fp is None or adme_res[4] == "Invalid Structure":
+        if fp is None or adme_res[4] == "Invalid Structure" or amcs_res[4] == "Invalid Structure":
             st.error("❌ Invalid SMILES structure string. Please verify chemical notation.")
         else:
             X_single = np.array([fp])
@@ -212,19 +251,22 @@ with tab_screen:
             activity_res = "Active" if pred == 1 else "Inactive"
             apd_res = "Reliable" if mean_dist <= APD_THRESHOLD_CONSTANT else "Unreliable"
             
-            st.markdown("#### 📊 Screening Summary")
-            col1, col2, col3, col4 = st.columns(4)
+            st.markdown("#### 📊 Core Status Overview")
+            col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric(label="Predicted Class", value=activity_res)
             col2.metric(label="Probability Score", value=f"{prob*100:.1f}%")
-            col3.metric(label="APD Status", value=apd_res)
-            col4.metric(label="Lipinski ADME Status", value=adme_res[4])
+            col3.metric(label="Model APD Domain", value=apd_res)
+            col4.metric(label="Lipinski Status (ADME)", value=adme_res[4])
+            col5.metric(label="AMCS Space Status", value=amcs_res[4])
             
-            st.markdown("#### 💊 Core Physicochemical Properties")
-            p1, p2, p3, p4 = st.columns(4)
+            st.markdown("#### 💊 Physicochemical Descriptor Profile Breakdown")
+            p1, p2, p3, p4, p5, p6 = st.columns(6)
             p1.metric("Mol Weight (MW)", f"{adme_res[0]} Da")
-            p2.metric("LogP (Lipophilicity)", adme_res[1])
+            p2.metric("Lipophilicity (LogP)", adme_res[1])
             p3.metric("H-Bond Donors", adme_res[2])
             p4.metric("H-Bond Acceptors", adme_res[3])
+            p5.metric("Basic Nitrogens (BaN)", int(amcs_res[0]) if not np.isnan(amcs_res[0]) else "N/A")
+            p6.metric("TPSA (Surface Area)", f"{amcs_res[3]} Å²" if not np.isnan(amcs_res[3]) else "N/A")
 
     st.markdown("---")
 
@@ -254,16 +296,20 @@ with tab_screen:
             processed_rows = 0
             
             try:
-                with st.spinner("Streaming chemical spaces, evaluating ADME rules, and processing APD constraints..."):
+                with st.spinner("Streaming data matrices, evaluating ADME rules, and parsing DataWarrior AMCS spaces..."):
                     for chunk in pd.read_csv(uploaded_file, chunksize=5000):
                         chunk = chunk.reset_index(drop=True)
                         
-                        # High-speed vectorized calculation of ADME parameters
+                        # 1. Vectorized calculation of ADME parameters
                         adme_data = list(chunk[target_col].apply(compute_adme_lipinski))
                         adme_df = pd.DataFrame(adme_data, columns=['MW (Da)', 'LogP', 'H-Bond Donors', 'H-Bond Acceptors', 'Lipinski Status'])
                         
-                        # Bind properties to core chunk row index
-                        chunk = pd.concat([chunk, adme_df], axis=1)
+                        # 2. Vectorized calculation of DataWarrior-aligned AMCS fields
+                        amcs_data = list(chunk[target_col].apply(get_datawarrior_aligned_amcs))
+                        amcs_df = pd.DataFrame(amcs_data, columns=['Basic Nitrogens', 'Aromatic Rings', 'cLogP', 'TPSA (Å²)', 'AMCS Status'])
+                        
+                        # Concat generated property frames straight into chunk
+                        chunk = pd.concat([chunk, adme_df, amcs_df], axis=1)
                         
                         fingerprints = chunk[target_col].apply(smiles_to_ecfp4)
                         valid_mask = fingerprints.notna()
@@ -272,7 +318,7 @@ with tab_screen:
                         chunk["Activity Prediction"] = "Invalid SMILES structure"
                         chunk["Probability Score"] = "N/A"
                         chunk["Mean Neighbor Distance"] = "N/A"
-                        chunk["APD Status"] = "N/A"
+                        chunk["Model APD Status"] = "N/A"
                         
                         if valid_mask.any():
                             X_screen = np.array(list(fingerprints[valid_mask]), dtype=np.int8)
@@ -283,11 +329,11 @@ with tab_screen:
                             distances, _ = nn_engine.kneighbors(X_screen, n_neighbors=5)
                             mean_distances = np.mean(distances, axis=1)
                             
-                            # Vectorized assignment back into chunk dataframe
+                            # Row assignment back to data streams
                             chunk.loc[valid_mask, "Activity Prediction"] = ["Active" if p == 1 else "Inactive" for p in preds]
                             chunk.loc[valid_mask, "Probability Score"] = [f"{prob*100:.1f}%" for prob in probs]
                             chunk.loc[valid_mask, "Mean Neighbor Distance"] = [f"{d:.4f}" for d in mean_distances]
-                            chunk.loc[valid_mask, "APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
+                            chunk.loc[valid_mask, "Model APD Status"] = ["Reliable" if d <= APD_THRESHOLD_CONSTANT else "Unreliable" for d in mean_distances]
                         
                         processed_chunks.append(chunk)
                         processed_rows += len(chunk)
@@ -302,15 +348,32 @@ with tab_screen:
                 st.markdown("### 📊 Dataset View Filter Configurations")
                 view_selection = st.radio(
                     "Filter displayed data tracking rows:",
-                    ["Show All Checked Compounds", "Show Hits Only (Predicted Active)", "Show Orally Bioavailable Hits Only (Active & Lipinski Pass)"],
+                    [
+                        "Show All Checked Compounds", 
+                        "Show Hits Only (Predicted Active)", 
+                        "Show Active & Lipinski Pass Only",
+                        "Show Active & AMCS Space Pass Only",
+                        "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)"
+                    ],
                     horizontal=True
                 )
                 
                 filtered_df = results_df.copy()
                 if view_selection == "Show Hits Only (Predicted Active)":
                     filtered_df = filtered_df[filtered_df["Activity Prediction"] == "Active"]
-                elif view_selection == "Show Orally Bioavailable Hits Only (Active & Lipinski Pass)":
+                    
+                elif view_selection == "Show Active & Lipinski Pass Only":
                     filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["Lipinski Status"] == "Pass")]
+
+                elif view_selection == "Show Active & AMCS Space Pass Only":
+                    filtered_df = filtered_df[(filtered_df["Activity Prediction"] == "Active") & (filtered_df["AMCS Status"] == "Pass")]
+                    
+                elif view_selection == "Show Elite Leads Only (Active, Lipinski Pass, & AMCS Pass)":
+                    filtered_df = filtered_df[
+                        (filtered_df["Activity Prediction"] == "Active") & 
+                        (filtered_df["Lipinski Status"] == "Pass") & 
+                        (filtered_df["AMCS Status"] == "Pass")
+                    ]
                 
                 st.write(f"Showing **{len(filtered_df):,}** matching compounds:")
                 st.dataframe(filtered_df.head(500), use_container_width=True)
@@ -319,7 +382,7 @@ with tab_screen:
                 st.download_button(
                     label="📥 Download Sorted Filtering Dataset",
                     data=csv_export,
-                    file_name="malaria_adme_filtered_results.csv",
+                    file_name="malaria_filtered_leads_output.csv",
                     mime="text/csv"
                 )
                 
@@ -328,7 +391,7 @@ with tab_screen:
                 st.code(traceback.format_exc(), language="python")
 
 # ------------------------------------------------------------------------------
-# TAB 2: MODEL DIAGNOSTICS & DOCUMENTATION
+# TAB 2: MODEL DIAGNOSTICS & GRAPHICS
 # ------------------------------------------------------------------------------
 with tab_metrics:
     st.markdown("### 🧬 Machine Learning Performance Matrices")
@@ -340,7 +403,6 @@ with tab_metrics:
     
     st.markdown(":red[Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4]")
     
-    # Dataset Splits Block
     st.markdown("#### 📐 Dataset Stratification")
     col_data1, col_data2, col_data3 = st.columns(3)
     with col_data1:
@@ -352,7 +414,6 @@ with tab_metrics:
 
     st.markdown("---")
 
-    # Classification Performance & Metrics Matrix
     st.markdown("#### 🎯 Classification Performance")
     col_perf, col_matrix = st.columns(2)
     
@@ -364,7 +425,6 @@ with tab_metrics:
         st.write("- **Precision (Positive Predictive Value):** `96.2%`")
         st.write("- **Matthews Correlation Coefficient (MCC):** `0.85`")
         
-        # Display the ROC Curve Image dynamically
         st.write("**Validation Curve Graphic:**")
         if os.path.exists("roc_curve.png"):
             st.image("roc_curve.png", caption="Receiver Operating Characteristic (ROC) Curve - Test Set Evaluation", use_container_width=True)
@@ -382,9 +442,6 @@ with tab_metrics:
 
     st.markdown("---")
 
-    # Informational Guide Rails for App Observers
-    st.markdown("#### 🔬 Interpretation")
+    st.markdown("#### 🔬 Interpretation Definitions")
     st.info("""
-    * **ROC-AUC (Receiver Operating Characteristic):** Represents the probability that the model will rank a randomly chosen active compound higher than a randomly chosen inactive one. A value approaching 1.0 defines near-perfect separation properties.
-    * **Applicability Domain (APD) Constraint Rules:** Predictive models are vulnerable when analyzing novel chemical families. Our $k$-Nearest Neighbors ($k$-NN) system evaluates geometric structural distances against our chemical space boundary of **0.6744**. Any compound scaling past this distance receives an *Unreliable* designation.
-    """)
+    * **Lipinski's Rule of 5 (ADME Validation):** Evaluates overall structural drug
