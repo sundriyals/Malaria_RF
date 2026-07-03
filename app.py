@@ -424,4 +424,21 @@ with tab_metrics:
         if os.path.exists("roc_curve.png"):
             st.image("roc_curve.png", caption="Receiver Operating Characteristic (ROC) Curve - Test Set Evaluation", use_container_width=True)
         else:
-            st.warning("⚠️ 'roc_curve.png' file not detected in
+            st.warning("⚠️ 'roc_curve.png' file not detected in root directory. Please upload your graphic asset to GitHub.")
+
+    with col_matrix:
+        st.write("**Confusion Matrix Contingency Layout:**")
+        matrix_data = {
+            "Predicted Inactive (0)": ["True Inactives (TN): 1,568", "False Inactives (FN): 179"],
+            "Predicted Active (1)": ["False Actives (FP): 48", "True Actives (TP): 1,229"]
+        }
+        matrix_df = pd.DataFrame(matrix_data, index=["Actual Inactive (0)", "Actual Active (1)"])
+        st.dataframe(matrix_df, use_container_width=True)
+
+    st.markdown("---")
+
+    st.markdown("#### 🔬 Interpretation Definitions")
+    st.info(r"""
+    * **Lipinski's Rule of 5 (ADME Validation):** Evaluates overall structural drug-likeness based on basic pharmacokinetic property parameters (MW <= 500, LogP <= 5, HBD <= 5, HBA <= 10). Allows 1 threshold violation.
+    * **Antimalarial Chemical Space (AMCS Filters):** Implements specialized rule sets matching DataWarrior's logic optimization for identifying specific antimalarial properties (Basic Nitrogens >= 1, Aromatic Rings >= 2, cLogP >= 2.0, TPSA <= 80 Å²). 
+    """)
