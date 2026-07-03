@@ -20,6 +20,45 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide")
 
 # ==============================================================================
+# CUSTOM VISUAL STYLING (Making Tabs Look Like Buttons)
+# ==============================================================================
+st.markdown("""
+    <style>
+        /* Target the tab container bar */
+        div[data-testid="stTabs"] button {
+            background-color: #f0f2f6;
+            color: #31333F;
+            border: 1px solid #dcdfe6;
+            border-radius: 6px;
+            padding: 10px 20px;
+            margin-right: 8px;
+            font-weight: 600;
+            transition: all 0.2s ease-in-out;
+        }
+        
+        /* Hover effect over the tab buttons */
+        div[data-testid="stTabs"] button:hover {
+            background-color: #e4e7ed;
+            border-color: #c0c4cc;
+            color: #ff4b4b;
+        }
+        
+        /* Active / Selected Tab Button styling */
+        div[data-testid="stTabs"] button[aria-selected="true"] {
+            background-color: #ff4b4b !important;
+            color: white !important;
+            border-color: #ff4b4b !important;
+            box-shadow: 0px 4px 6px rgba(255, 75, 75, 0.2);
+        }
+        
+        /* Remove Streamlit's default ugly red underline indicator line */
+        div[data-testid="stTabs"] [data-baseweb="tab-highlight-bar"] {
+            background-color: transparent !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==============================================================================
 # CONFIGURATION & CONSTANTS
 # ==============================================================================
 APD_THRESHOLD_CONSTANT = 0.6744
@@ -109,7 +148,7 @@ except Exception as e:
 # ==============================================================================
 st.title("🔬 Anti-Plasmodial Activity & APD Screening Portal")
 
-# Split web portal into distinct interactive views
+# Split web portal into distinct interactive views (now styled as buttons)
 tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validation & Metrics"])
 
 # ------------------------------------------------------------------------------
@@ -118,13 +157,13 @@ tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validati
 with tab_screen:
     st.markdown(f"""
     Upload screening candidates containing structural **SMILES** strings to generate machine learning predictions. 
-    All calculations are backed by an automated **Applicability Domain (APD)** validation metric.
+    All calculations are backed by an automated **Applicability Domain (Apd)** validation metric.
     * **Active APD Threshold Limit:** `{APD_THRESHOLD_CONSTANT:.4f}`
     """)
 
     # --- SINGLE COMPOUND SCREEN ---
     st.write("### 🧪 Single Compound Quick Screen")
-    single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine - CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC:")
+    single_smiles = st.text_input("Paste a single SMILES string here (e.g., CC1CC2C3CCC4=CC(=O)C=CC4(C)C3(F)C(O)CC2(C)C1(O)C(=O)CO):")
 
     if single_smiles:
         single_smiles = single_smiles.strip()
@@ -239,19 +278,19 @@ with tab_screen:
 # TAB 2: MODEL DIAGNOSTICS & DOCUMENTATION
 # ------------------------------------------------------------------------------
 with tab_metrics:
-    st.markdown("### 🧬 Machine Learning Performance Matrices")
+    st.markdown("### 🧬 Machine Learning Performance Diagnostics")
     st.write("""
-    This web application implements a robust **Random Forest Classifier** optimized to predict phenotypic activity against *Plasmodium falciparum*. 
-    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2. This is the modified version of our earlier reported model: Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4
+    This web application implements a robust **Random Forest Classifier** optimized to predict inhibitory activity against *Plasmodium falciparum*. 
+    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2.
     """)
     
     # Dataset Splits Block
     st.markdown("#### 📐 Dataset Stratification")
     col_data1, col_data2, col_data3 = st.columns(3)
     with col_data1:
-        st.metric(label="Total Compounds Ensembled", value="15,120")
+        st.metric(label="Total Compounds Ensembled", value="15,118")
     with col_data2:
-        st.metric(label="Training Set Size (80%)", value="12,096")
+        st.metric(label="Training Set Size (80%)", value="12,094")
     with col_data3:
         st.metric(label="Independent Test Set Size (20%)", value="3,024")
 
@@ -289,7 +328,7 @@ with tab_metrics:
     st.markdown("---")
 
     # Informational Guide Rails for App Observers
-    st.markdown("#### 🔬 Interpretation")
+    st.markdown("#### 🔬 Interpretation Architecture")
     st.info("""
     * **ROC-AUC (Receiver Operating Characteristic):** Represents the probability that the model will rank a randomly chosen active compound higher than a randomly chosen inactive one. A value approaching 1.0 defines near-perfect separation properties.
     * **Applicability Domain (APD) Constraint Rules:** Predictive models are vulnerable when analyzing novel chemical families. Our $k$-Nearest Neighbors ($k$-NN) system evaluates geometric structural distances against our chemical space boundary of **0.6744**. Any compound scaling past this distance receives an *Unreliable* designation.
