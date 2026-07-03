@@ -163,7 +163,7 @@ with tab_screen:
 
     # --- SINGLE COMPOUND SCREEN ---
     st.write("### 🧪 Single Compound Quick Screen")
-    single_smiles = st.text_input("Paste a single SMILES string here (e.g., CC1CC2C3CCC4=CC(=O)C=CC4(C)C3(F)C(O)CC2(C)C1(O)C(=O)CO):")
+    single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC:")
 
     if single_smiles:
         single_smiles = single_smiles.strip()
@@ -281,7 +281,8 @@ with tab_metrics:
     st.markdown("### 🧬 Machine Learning Performance Matrices")
     st.write("""
     This web application implements a robust **Random Forest Classifier** optimized to predict inhibitory activity against *Plasmodium falciparum*. 
-    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2. This model is the updated version of our previously published work: Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4 
+    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2. This model is the updated version of our previously published work: 
+    Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4 
     """)
     
     # Dataset Splits Block
