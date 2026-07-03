@@ -239,10 +239,10 @@ with tab_screen:
 # TAB 2: MODEL DIAGNOSTICS & DOCUMENTATION
 # ------------------------------------------------------------------------------
 with tab_metrics:
-    st.markdown("### 🧬 Machine Learning Performance Diagnostics")
+    st.markdown("### 🧬 Machine Learning Performance Matrices")
     st.write("""
-    This web application implements a robust **Random Forest Classifier** optimized to predict inhibitory activity against *Plasmodium falciparum*. 
-    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2.
+    This web application implements a robust **Random Forest Classifier** optimized to predict phenotypic activity against *Plasmodium falciparum*. 
+    Chemical inputs are structurally parsed and featurized into **2048-bit ECFP4 (Extended-Connectivity Fingerprints)** with a bond radius of 2. This is the modified version of our earlier reported model: Kore, M., Acharya, D., Sharma, L. et al. Development and experimental validation of a machine learning model for the prediction of new antimalarials. BMC Chemistry 19, 28 (2025). https://doi.org/10.1186/s13065-025-01395-4
     """)
     
     # Dataset Splits Block
