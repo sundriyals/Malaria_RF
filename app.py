@@ -124,7 +124,7 @@ with tab_screen:
 
     # --- SINGLE COMPOUND SCREEN ---
     st.write("### 🧪 Single Compound Quick Screen")
-    single_smiles = st.text_input("Paste a single SMILES string here (e.g., CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC:")
+    single_smiles = st.text_input("Paste a single SMILES string here (e.g., chloroquine - CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC:")
 
     if single_smiles:
         single_smiles = single_smiles.strip()
