@@ -289,7 +289,7 @@ with tab_metrics:
     st.markdown("---")
 
     # Informational Guide Rails for App Observers
-    st.markdown("#### 🔬 Interpretation Architecture")
+    st.markdown("#### 🔬 Interpretation")
     st.info("""
     * **ROC-AUC (Receiver Operating Characteristic):** Represents the probability that the model will rank a randomly chosen active compound higher than a randomly chosen inactive one. A value approaching 1.0 defines near-perfect separation properties.
     * **Applicability Domain (APD) Constraint Rules:** Predictive models are vulnerable when analyzing novel chemical families. Our $k$-Nearest Neighbors ($k$-NN) system evaluates geometric structural distances against our chemical space boundary of **0.6744**. Any compound scaling past this distance receives an *Unreliable* designation.
