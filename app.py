@@ -49,6 +49,12 @@ st.markdown("""
         div[data-testid="stTabs"] [data-baseweb="tab-highlight-bar"] {
             background-color: transparent !important;
         }
+
+        /* ADD THIS PARTS AT THE BOTTOM TO UNHIDE THE RIGHT ATOM PANEL */
+        iframe[title="streamlit_ketcher.st_ketcher"] {
+            width: 100% !important;
+            min-width: 580px !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -215,7 +221,7 @@ with tab_screen:
     st.markdown(f"Evaluate anti-malarial property candidates via ML engines, **Lipinski rules**, and DataWarrior **AMCS parameters**.\n* **Model APD Threshold Boundary:** `{APD_THRESHOLD_CONSTANT:.4f}`")
 
     # Master Left/Right Column Configuration to eliminate vertical scrolling layout lag
-    left_panel, right_panel = st.columns([1, 1], gap="large")
+    left_panel, right_panel = st.columns([3, 2], gap="large")
 
     # --------------------------------------------------------------------------
     # LEFT PANEL: SINGLE MOLECULE SCREENING WORKSPACE
