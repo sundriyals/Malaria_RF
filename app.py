@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 st.set_page_config(page_title="Anti-Plasmodial Activity Predictor", layout="wide")
 
 # ==============================================================================
-# CUSTOM VISUAL STYLING (Making Tabs Look Like Buttons)
+# CUSTOM VISUAL STYLING (Making Tabs Look Like Buttons + Ketcher Fix)
 # ==============================================================================
 st.markdown("""
     <style>
@@ -50,7 +50,7 @@ st.markdown("""
             background-color: transparent !important;
         }
 
-        /* ADD THIS PARTS AT THE BOTTOM TO UNHIDE THE RIGHT ATOM PANEL */
+        /* Enforce minimum sizing footprint so ketcher's right panel displays properly */
         iframe[title="streamlit_ketcher.st_ketcher"] {
             width: 100% !important;
             min-width: 580px !important;
@@ -112,8 +112,9 @@ def compute_adme_lipinski(smiles):
 
 def get_datawarrior_aligned_amcs(smiles):
     """
-    Calculates DataWarrior AMCS space metrics. Status is 'Fail' only if 
-    MORE THAN ONE criteria is missed (violations >= 2).
+    Calculates DataWarrior AMCS space metrics based on user rules:
+    - BaN: Basic Nitrogens (Aliphatic Nitrogens + Imidazoles count as 1 + Heteroaromatic N ONLY if ring carries an external N attachment)
+    - Status is 'Fail' only if MORE THAN ONE criteria is missed (violations >= 2).
     """
     try:
         smiles = str(smiles).strip()
@@ -132,37 +133,79 @@ def get_datawarrior_aligned_amcs(smiles):
         tpsa = round(Descriptors.TPSA(mol), 2)
         ar = Descriptors.NumAromaticRings(mol)
         
-        # Non-basic nitrogen isolation SMARTS rules
+        # Deactivation rules for non-basic Nitrogen configurations
         amide_smarts = Chem.MolFromSmarts("[NX3][CX3](=[OX1,SX1])")
         sulfonamide_smarts = Chem.MolFromSmarts("[NX3][SX4](=[OX1])(=[OX1])")
         nitro_smarts = Chem.MolFromSmarts("[NX3](=[OX1])=[OX1]")
+        imidazole_smarts = Chem.MolFromSmarts("n1cc[nH]c1") # Dedicated filter to flag imidazole rings
         
         amide_matches = set(x[0] for x in mol.GetSubstructMatches(amide_smarts)) if amide_smarts else set()
         sulfonamide_matches = set(x[0] for x in mol.GetSubstructMatches(sulfonamide_smarts)) if sulfonamide_smarts else set()
         nitro_matches = set(x[0] for x in mol.GetSubstructMatches(nitro_smarts)) if nitro_smarts else set()
         
+        # Find all atom indices tracking inside an imidazole core ring
+        imidazole_atoms = set()
+        if imidazole_smarts:
+            for match in mol.GetSubstructMatches(imidazole_smarts):
+                imidazole_atoms.update(match)
+        
         ban = 0
+        ring_info = mol.GetRingInfo()
+        
+        # Track if an entire aromatic ring system has a direct exocyclic Nitrogen connection
+        aromatic_rings_with_external_n = []
+        for ring_idx, atom_indices in enumerate(ring_info.AtomRings()):
+            # Verify if this specific ring is entirely aromatic
+            if all(mol.GetAtomWithIdx(idx).GetIsAromatic() for idx in atom_indices):
+                has_external_n_attachment = False
+                for idx in atom_indices:
+                    atom = mol.GetAtomWithIdx(idx)
+                    for neighbor in atom.GetNeighbors():
+                        # Look for an external Nitrogen neighbor not located within the ring boundaries
+                        if neighbor.GetAtomicNum() == 7 and neighbor.GetIdx() not in atom_indices:
+                            has_external_n_attachment = True
+                            break
+                if has_external_n_attachment:
+                    aromatic_rings_with_external_n.append(set(atom_indices))
+
+        processed_imidazole_rings = set()
+
         for atom in mol.GetAtoms():
             if atom.GetAtomicNum() == 7:  
                 idx = atom.GetIdx()
                 if idx in amide_matches or idx in sulfonamide_matches or idx in nitro_matches:
                     continue
+                
+                # Check A: Handle imidazole structural exceptions (Force count as exactly 1)
+                if idx in imidazole_atoms:
+                    # Identify which structural ring index group it belongs to
+                    for r_idx, atom_indices in enumerate(ring_info.AtomRings()):
+                        if idx in atom_indices and set(atom_indices).issubset(imidazole_atoms):
+                            if r_idx not in processed_imidazole_rings:
+                                ban += 1
+                                processed_imidazole_rings.add(r_idx)
+                    continue
+
+                # Check B: Aliphatic Nitrogens (e.g. Chloroquine tertiary tail)
                 if not atom.GetIsAromatic():
                     if any(neighbor.GetIsAromatic() for neighbor in atom.GetNeighbors()):
                         continue
                     ban += 1
+                # Check C: Heteroaromatic ring Nitrogens (e.g. Quinolines / Pyridines)
                 else:
                     if atom.GetDegree() == 2:
-                        ban += 1
+                        # Conditional rule: Must be inside an aromatic ring system carrying an external Nitrogen attachment point
+                        belongs_to_active_heterocycle = any(idx in ring for ring in aromatic_rings_with_external_n)
+                        if belongs_to_active_heterocycle:
+                            ban += 1
                         
-        # Calculate individual violations to enforce relaxed AMCS logic
+        # Enforce relaxed space calculation rules (Fail only if violations >= 2)
         violations = 0
         if ban < 1: violations += 1
         if ar < 2: violations += 1
         if clogp < 2.0: violations += 1
         if tpsa > 80.0: violations += 1
         
-        # Pass unless more than one criterion is missed (violations >= 2)
         amcs_status = "Fail" if violations > 1 else "Pass"
         return [ban, ar, clogp, tpsa, amcs_status]
     except Exception:
@@ -220,7 +263,7 @@ tab_screen, tab_metrics = st.tabs(["🧪 Screening Portal", "📊 Model Validati
 with tab_screen:
     st.markdown(f"Evaluate anti-malarial property candidates via ML engines, **Lipinski rules**, and DataWarrior **AMCS parameters**.\n* **Model APD Threshold Boundary:** `{APD_THRESHOLD_CONSTANT:.4f}`")
 
-    # Master Left/Right Column Configuration to eliminate vertical scrolling layout lag
+    # Fixed layout column weights ensuring Ketcher fits comfortably on the screen
     left_panel, right_panel = st.columns([3, 2], gap="large")
 
     # --------------------------------------------------------------------------
@@ -234,8 +277,8 @@ with tab_screen:
         if input_mode == "Type / Paste SMILES String":
             single_smiles = st.text_input("SMILES String input:", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC", label_visibility="collapsed")
         else:
-            st.caption("ℹ️ Draw structure below. Click the green 'Apply' checkmark inside Ketcher to calculate metrics.")
-            single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC")
+            st.caption("ℹ/ Use the drawing tools below to sketch your candidate. Click the green 'Apply' checkmark button inside Ketcher's toolbar to automatically compute descriptors.")
+            single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC", molecule_format="smiles")
 
         if single_smiles:
             single_smiles = single_smiles.strip()
@@ -273,7 +316,7 @@ with tab_screen:
                     l3.metric("H-Bond Donors (<=5)", adme_res[2])
                     l4.metric("H-Bond Acceptors (<=10)", adme_res[3])
                     
-                # 3. Separated AMCS Box (Using custom violation metric threshold rule)
+                # 3. Separated AMCS Box (Using relaxed metric constraints)
                 with st.container(border=True):
                     st.markdown(f"#### 🧬 DataWarrior AMCS Space — Status: **{amcs_res[4]}**")
                     a1, a2, a3, a4 = st.columns(4)
@@ -298,7 +341,7 @@ with tab_screen:
 
             smiles_col = [col for col in header_df.columns if col.lower() in ['smiles', 'smiles string', 'structure']]
             if not smiles_col:
-                st.error("❌ Column Error: Could not locate a 'Smiles' or 'Structure' column header header.")
+                st.error("❌ Column Error: Could not locate a 'Smiles' or 'Structure' column header.")
             else:
                 target_col = smiles_col[0]
                 st.success(f"Running high-throughput matrix pipeline on column: '{target_col}'")
