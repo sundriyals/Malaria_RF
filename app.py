@@ -278,8 +278,7 @@ with tab_screen:
             single_smiles = st.text_input("SMILES String input:", value="CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC", label_visibility="collapsed")
         else:
             st.caption("ℹ/ Use the drawing tools below to sketch your candidate. Click the green 'Apply' checkmark button inside Ketcher's toolbar to automatically compute descriptors.")
-            single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC", molecule_format="smiles")
-
+            single_smiles = st_ketcher("CCN(CCCC(Nc1c2ccc(Cl)cc2ncc1)C)CC", molecule_format="SMILES")
         if single_smiles:
             single_smiles = single_smiles.strip()
             fp = smiles_to_ecfp4(single_smiles)
